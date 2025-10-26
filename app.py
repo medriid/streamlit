@@ -89,7 +89,6 @@ def inject_css():
 
 inject_css()
 
-# If the page was loaded with ?login=1, open the login UI and then clear the query param
 try:
     qp = st.query_params
     if qp and qp.get("login"):
@@ -662,7 +661,6 @@ with draw_tab:
 
 sidebar = st.sidebar
 sidebar.title("Controls")
-sidebar.markdown("<div style='position:sticky; bottom:12px; padding-top:8px;'><a href='?login=1' style='display:inline-block;padding:10px 14px;background:linear-gradient(180deg,#111,#0b0b0b);color:#fff;border:1px solid rgba(255,255,255,0.06);border-radius:10px;text-decoration:none;font-weight:600;font-family:Inter, Arial, sans-serif'>Account / Login</a></div>", unsafe_allow_html=True)
 
 if 'show_login_ui' not in st.session_state:
     st.session_state['show_login_ui'] = False
@@ -885,6 +883,9 @@ with st.expander("Quick tips"):
     - You can search by IUPAC or common name (e.g. `aspirin`, `glucose`).
     - Compounds with ionic formulas (e.g., salts) will trigger an automatic search for crystal structures in the Crystallography Open Database (COD), but it will probably not work.
     """)
+
+# Place Account / Login at the bottom of the Controls sidebar
+sidebar.markdown("<div style='position:relative; padding-top:8px; margin-top:12px;'><a href='?login=1' style='display:block;margin-top:auto;padding:10px 14px;background:linear-gradient(180deg,#111,#0b0b0b);color:#fff;border:1px solid rgba(255,255,255,0.06);border-radius:10px;text-decoration:none;font-weight:600;font-family:Inter, Arial, sans-serif;text-align:center'>Account / Login</a></div>", unsafe_allow_html=True)
 
 
 
