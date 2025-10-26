@@ -26,7 +26,36 @@ else:
 
 import pubchempy as pcp
 import re
+import urllib.parse
 CRYSTAL_SERVICE_URL = os.environ.get("CRYSTAL_SERVICE_URL")
+
+
+def normalize_formula(formula: Optional[str]) -> Optional[str]:
+    if not formula:
+        return formula
+    toks = re.findall(r'([A-Z][a-z]?)(\d*)', formula)
+    if not toks:
+        return formula
+    elems = []
+    for sym, cnt in toks:
+        elems.append((sym, cnt))
+    alkali = {"Li", "Na", "K", "Rb", "Cs", "Fr"}
+    alkaline_earth = {"Be", "Mg", "Ca", "Sr", "Ba", "Ra"}
+    metals_first = []
+    others = []
+    for sym, cnt in elems:
+        if sym in alkali or sym in alkaline_earth:
+            metals_first.append((sym, cnt))
+        else:
+            others.append((sym, cnt))
+    if metals_first:
+        ordered = metals_first + others
+    else:
+        ordered = elems
+    parts = []
+    for sym, cnt in ordered:
+        parts.append(sym + (cnt if cnt else ""))
+    return "".join(parts)
 
 
 st.set_page_config(page_title="Mid Molecule Thing", layout="wide", initial_sidebar_state="expanded")
@@ -282,15 +311,52 @@ def render_3dmol_from_text(model_text: str, fmt: str = "sdf", width: int = 700, 
     return html
 
 
+def fetch_cif_from_cod(formula: Optional[str]) -> Optional[str]:
+    """Try to find and download a CIF from the Crystallography Open Database (COD) for the given formula.
+
+    This does a best-effort HTML search on COD and attempts to follow the first .cif link found.
+    Returns CIF text or None.
+    """
+    if not formula:
+        return None
+    try:
+        q = urllib.parse.quote_plus(formula)
+        search_url = f"https://www.crystallography.net/cod/search.html?formula={q}"
+        r = requests.get(search_url, timeout=15)
+        if not r.ok:
+            return None
+        html = r.text
+        # find links to .cif files
+        matches = re.findall(r'href="([^"]+\.cif)"', html)
+        if not matches:
+            return None
+        for href in matches:
+            # make absolute URL if needed
+            if href.startswith("/"):
+                url = f"https://www.crystallography.net{href}"
+            elif href.startswith("http"):
+                url = href
+            else:
+                url = f"https://www.crystallography.net/cod/{href}"
+            try:
+                r2 = requests.get(url, timeout=15)
+                if r2.ok and r2.text and len(r2.text) > 100:
+                    return r2.text
+            except Exception:
+                continue
+    except Exception:
+        return None
+    return None
+
+
  
 
 st.title("Mid Molecule Thing")
 
-
 sidebar = st.sidebar
 sidebar.title("Controls")
+
 def _trigger_search():
-    """Callback used by the search text_input to trigger a search when Enter is pressed."""
     st.session_state["do_search"] = True
 
 if "search_query" not in st.session_state:
@@ -299,84 +365,45 @@ if "do_search" not in st.session_state:
     st.session_state["do_search"] = False
 
 search_query = sidebar.text_input("Search (IUPAC or common name)", value=st.session_state["search_query"], key="search_query", on_change=_trigger_search)
-sidebar.markdown("**Theme**")
-theme_choice = sidebar.selectbox("Choose theme", ["Dark (default)", "Light"], index=0)
 seed_button = sidebar.button("Seed DB (run small seed)")
-
-
-if theme_choice.startswith("Light"):
-    st.markdown(
-        """
-        <style>
-        body { background: #ffffff; color: #0b0b0b; }
-        .molevis-card { background: rgba(0,0,0,0.03); color: inherit; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-else:
-    st.markdown(
-        """
-        <style>
-        body { background: #0b0b0b; color: #f7f7f7; }
-        .molevis-card { background: rgba(255,255,255,0.02); color: inherit; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-suggestions = db_suggest(search_query) if search_query else []
-selected_suggestion = None
-if suggestions:
-    opts = [f"{s['cid']}  —  {s['name']}" for s in suggestions]
-    pick = sidebar.selectbox("Suggestions (from cache)", options=["(pick one)"] + opts)
-    if pick != "(pick one)":
-        idx = opts.index(pick)
-        selected_suggestion = suggestions[idx]
-
 
 if seed_button:
     st.info("Seeding DB with a small selection...")
     try:
-        
         seed_script = os.path.join("db", "populate_pubchem.py")
-        if not USE_DB:
-            st.error("DATABASE_URL is not set. Add your Postgres DATABASE_URL as a Streamlit Cloud secret or set it in your environment before seeding.")
-        else:
-            if os.path.exists(seed_script):
-                import subprocess
-                import sys
-                
-                proc = subprocess.run([sys.executable, seed_script], capture_output=True, text=True)
-                if proc.returncode == 0:
-                    st.success("Seed script finished.")
-                else:
-                    st.error(f"Seeding failed (exit code {proc.returncode}).\n\nstdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}")
+        if os.path.exists(seed_script):
+            import subprocess, sys
+            proc = subprocess.run([sys.executable, seed_script], capture_output=True, text=True)
+            if proc.returncode == 0:
+                st.success("Seed script finished.")
             else:
-                seeds = ["glucose", "aspirin", "acetone", "benzene", "ethanol", "caffeine", "nicotine", "paracetamol", "ibuprofen", "adenine"]
-                for s in seeds:
-                    comp = pubchem_fetch_by_name(s)
-                    if not comp:
-                        continue
-                    cid = int(comp.cid)
-                    sdf_text = pubchem_sdf(cid)
-                    try:
-                        db_insert({
-                            "cid": cid,
-                            "pref_name": comp.iupac_name or (comp.synonyms[0] if comp.synonyms else comp.title),
-                            "common_names": comp.synonyms or [],
-                            "smiles": comp.isomeric_smiles or comp.smiles,
-                            "inchi": comp.inchi,
-                            "formula": comp.molecular_formula,
-                            "mol_weight": comp.molecular_weight,
-                            "sdf": sdf_text.encode() if sdf_text else None
-                        })
-                    except Exception as e:
-                        st.warning(f"Insert failed for {s}: {e}")
-                st.success("Inline seeding done.")
+                st.error(f"Seeding failed (exit code {proc.returncode}).\n\nstdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}")
+        else:
+            seeds = ["glucose", "aspirin", "acetone", "benzene", "ethanol", "caffeine", "nicotine", "paracetamol", "ibuprofen", "adenine"]
+            for s in seeds:
+                comp = pubchem_fetch_by_name(s)
+                if not comp:
+                    continue
+                cid = int(comp.cid)
+                sdf_text = pubchem_sdf(cid)
+                try:
+                    db_insert({
+                        "cid": cid,
+                        "pref_name": comp.iupac_name or (comp.synonyms[0] if comp.synonyms else comp.title),
+                        "common_names": comp.synonyms or [],
+                        "smiles": comp.isomeric_smiles or comp.smiles,
+                        "inchi": comp.inchi,
+                        "formula": comp.molecular_formula,
+                        "mol_weight": comp.molecular_weight,
+                        "sdf": sdf_text.encode() if sdf_text else None
+                    })
+                except Exception as e:
+                    st.warning(f"Insert failed for {s}: {e}")
+            st.success("Inline seeding done.")
     except Exception as e:
         st.error("Seeding failed: " + str(e))
+
+selected_suggestion = None
 
 
 do_search = st.button("Search") or st.session_state.get("do_search", False) or (selected_suggestion is not None)
@@ -424,7 +451,7 @@ if do_search:
                     "common_names": comp.synonyms or [],
                     "smiles": comp.isomeric_smiles or comp.smiles,
                     "inchi": comp.inchi,
-                    "formula": comp.molecular_formula,
+                    "formula": normalize_formula(comp.molecular_formula),
                     "mol_weight": comp.molecular_weight,
                     "sdf": sdf_text.encode() if sdf_text else None,
                     "source": "pubchem"
@@ -499,39 +526,24 @@ if do_search:
                 
                 formula = result.get("formula")
                 if is_probably_ionic(formula):
-                    st.write("3D model not available for inorganic ionic solids (e.g., crystal lattice). Showing 2D image instead.")
-                    col1, col2 = st.columns([1, 1])
-                    with col1:
-                        cod_search_url = f"https://www.crystallography.net/cod/search.html?formula={result.get('formula') or ''}"
-                        st.markdown(f"[Search COD for crystal structures]({cod_search_url})")
-                    with col2:
-                        st.write("Or paste a CIF below and render it here:")
-                    
-                    cif_text = st.text_area("Paste CIF here (optional)")
-                    if st.button("Render pasted CIF") and cif_text.strip():
+                    st.write("Detected likely inorganic ionic solid — attempting to find a crystal structure automatically (COD)...")
+                    cif_text = None
+                    try:
+                        with st.spinner("Searching COD for a matching CIF..."):
+                            cif_text = fetch_cif_from_cod(result.get('formula') or "")
+                    except Exception:
+                        cif_text = None
+
+                    if cif_text:
                         try:
                             viewer_html = render_3dmol_from_text(cif_text, fmt="cif", width=700, height=480)
                             st_html(viewer_html, height=520)
                         except Exception as e:
-                            st.error(f"Failed to render CIF: {e}")
-                    if CRYSTAL_SERVICE_URL:
-                        st.write("Or use configured crystal service to convert CIF -> XYZ/PDB and render (service detected).")
-                        if st.button("Convert & render using crystal service") and cif_text.strip():
-                            try:
-                                import json
-                                resp = requests.post(f"{CRYSTAL_SERVICE_URL.rstrip('/')}/convert/cif", json={"cif": cif_text}, timeout=30)
-                                if resp.ok:
-                                    data = resp.json()
-                                    xyz = data.get("xyz")
-                                    if xyz:
-                                        viewer_html = render_3dmol_from_text(xyz, fmt="xyz", width=700, height=480)
-                                        st_html(viewer_html, height=520)
-                                    else:
-                                        st.error("Service returned no XYZ output.")
-                                else:
-                                    st.error(f"Crystal service error: {resp.status_code} {resp.text}")
-                            except Exception as e:
-                                st.error(f"Failed to call crystal service: {e}")
+                            st.error("Found a CIF on COD but failed to render it: " + str(e))
+                    else:
+                        cod_search_url = f"https://www.crystallography.net/cod/search.html?formula={urllib.parse.quote_plus(result.get('formula') or '')}"
+                        st.write("No CIF found automatically. You can search COD manually:")
+                        st.markdown(f"[Search COD for crystal structures]({cod_search_url})")
                 else:
                     st.write("3D model not available.")
 

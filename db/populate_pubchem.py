@@ -63,6 +63,34 @@ def fetch_sdf(cid: int):
     return r.content
 
 
+def normalize_formula(formula: str | None) -> str | None:
+    if not formula:
+        return formula
+    toks = re.findall(r'([A-Z][a-z]?)(\d*)', formula)
+    if not toks:
+        return formula
+    elems = []
+    for sym, cnt in toks:
+        elems.append((sym, cnt))
+    alkali = {"Li", "Na", "K", "Rb", "Cs", "Fr"}
+    alkaline_earth = {"Be", "Mg", "Ca", "Sr", "Ba", "Ra"}
+    metals_first = []
+    others = []
+    for sym, cnt in elems:
+        if sym in alkali or sym in alkaline_earth:
+            metals_first.append((sym, cnt))
+        else:
+            others.append((sym, cnt))
+    if metals_first:
+        ordered = metals_first + others
+    else:
+        ordered = elems
+    parts = []
+    for sym, cnt in ordered:
+        parts.append(sym + (cnt if cnt else ""))
+    return "".join(parts)
+
+
  
 
 
@@ -105,7 +133,7 @@ def seed_database(compound_list):
                 syns,
                 props.get("smiles"),
                 props.get("inchi"),
-                props.get("formula"),
+                normalize_formula(props.get("formula")),
                 props.get("mol_weight"),
                 psycopg2.Binary(sdf) if sdf else None,
             ))
