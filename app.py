@@ -349,6 +349,125 @@ def fetch_cif_from_cod(formula: Optional[str]) -> Optional[str]:
     return None
 
 
+def _atomic_number_to_symbol_map():
+    # Minimal mapping for common elements; extend if needed
+    return {
+        1: 'H', 2: 'He', 3: 'Li', 4: 'Be', 5: 'B', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 10: 'Ne',
+        11: 'Na', 12: 'Mg', 13: 'Al', 14: 'Si', 15: 'P', 16: 'S', 17: 'Cl', 18: 'Ar',
+        19: 'K', 20: 'Ca', 26: 'Fe', 29: 'Cu', 30: 'Zn', 35: 'Br', 53: 'I'
+    }
+
+
+def pubchem3d_to_xyz(cid: int) -> Optional[str]:
+    """Try to obtain 3D coordinates from PubChem record JSON and convert to XYZ text.
+
+    This is a best-effort parser: it recursively searches the returned JSON for a
+    list of atom-like dicts containing numeric x/y/z keys (or parallel arrays).
+    Returns an XYZ-formatted string or None.
+    """
+    try:
+        url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/record/JSON/?record_type=3d"
+        r = requests.get(url, timeout=15)
+        if not r.ok:
+            return None
+        j = r.json()
+
+        # recursive search for candidate atom lists
+        candidates = []
+
+        def scan(obj):
+            if isinstance(obj, list):
+                # if list of dicts, check for coords
+                if obj and all(isinstance(i, dict) for i in obj):
+                    # check if items have numeric x/y/z keys
+                    good = True
+                    for item in obj:
+                        if not any(k.lower() in item for k in ('x','y','z','coord')):
+                            # try to find numeric keys
+                            if not any(isinstance(v, (int, float)) for v in item.values()):
+                                good = False
+                                break
+                    if good:
+                        candidates.append(obj)
+                for i in obj:
+                    scan(i)
+            elif isinstance(obj, dict):
+                for v in obj.values():
+                    scan(v)
+
+        scan(j)
+
+        # try to parse candidates
+        atom_map = _atomic_number_to_symbol_map()
+
+        def parse_list(lst):
+            rows = []
+            for item in lst:
+                if not isinstance(item, dict):
+                    return None
+                # try common coordinate keys
+                x = None; y = None; z = None
+                for k, v in item.items():
+                    kl = k.lower()
+                    if kl in ('x','xcoord','x_coord') and isinstance(v, (int, float)):
+                        x = v
+                    if kl in ('y','ycoord','y_coord') and isinstance(v, (int, float)):
+                        y = v
+                    if kl in ('z','zcoord','z_coord') and isinstance(v, (int, float)):
+                        z = v
+                # fallback: look for a list/tuple of coords
+                if x is None or y is None or z is None:
+                    # look for numeric list under some key
+                    for v in item.values():
+                        if isinstance(v, (list, tuple)) and len(v) >= 3 and all(isinstance(n, (int, float)) for n in v[:3]):
+                            x, y, z = float(v[0]), float(v[1]), float(v[2])
+                            break
+
+                if x is None or y is None or z is None:
+                    # not an atom-like dict
+                    return None
+
+                # find element symbol
+                sym = None
+                for key in ('element','atom','symbol','label'):
+                    if key in item and isinstance(item[key], str):
+                        sym = item[key].strip()
+                        break
+                if not sym:
+                    # try atomic number
+                    for key in ('atomic_number','element_id','Z'):
+                        if key in item:
+                            try:
+                                zn = int(item[key])
+                                sym = atom_map.get(zn, None)
+                                break
+                            except Exception:
+                                continue
+                if not sym:
+                    # fallback to X as 'X'
+                    sym = 'X'
+
+                rows.append((sym, float(x), float(y), float(z)))
+            return rows
+
+        parsed = None
+        for cand in candidates:
+            parsed = parse_list(cand)
+            if parsed:
+                break
+
+        if not parsed:
+            return None
+
+        # build XYZ string
+        lines = [str(len(parsed)), f"PubChem CID {cid} 3D extracted"]
+        for sym, x, y, z in parsed:
+            lines.append(f"{sym} {x:.6f} {y:.6f} {z:.6f}")
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
  
 
 st.title("Mid Molecule Thing")
@@ -541,9 +660,24 @@ if do_search:
                         except Exception as e:
                             st.error("Found a CIF on COD but failed to render it: " + str(e))
                     else:
-                        cod_search_url = f"https://www.crystallography.net/cod/search.html?formula={urllib.parse.quote_plus(result.get('formula') or '')}"
-                        st.write("No CIF found automatically. You can search COD manually:")
-                        st.markdown(f"[Search COD for crystal structures]({cod_search_url})")
+                        # Try PubChem 3D JSON fallback -> XYZ
+                        pubchem_xyz = None
+                        try:
+                            with st.spinner("No CIF found — attempting PubChem 3D fallback..."):
+                                pubchem_xyz = pubchem3d_to_xyz(result['cid'])
+                        except Exception:
+                            pubchem_xyz = None
+
+                        if pubchem_xyz:
+                            try:
+                                viewer_html = render_3dmol_from_text(pubchem_xyz, fmt="xyz", width=700, height=480)
+                                st_html(viewer_html, height=520)
+                            except Exception as e:
+                                st.error("PubChem 3D data found but failed to render: " + str(e))
+                        else:
+                            cod_search_url = f"https://www.crystallography.net/cod/search.html?formula={urllib.parse.quote_plus(result.get('formula') or '')}"
+                            st.write("No CIF or PubChem 3D coordinates found automatically. You can search COD manually:")
+                            st.markdown(f"[Search COD for crystal structures]({cod_search_url})")
                 else:
                     st.write("3D model not available.")
 
