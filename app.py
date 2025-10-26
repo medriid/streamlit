@@ -89,6 +89,15 @@ def inject_css():
 
 inject_css()
 
+# If the page was loaded with ?login=1, open the login UI and then clear the query param
+try:
+    qp = st.experimental_get_query_params()
+    if qp and qp.get("login"):
+        st.session_state['show_login_ui'] = True
+        st.experimental_set_query_params()
+except Exception:
+    pass
+
 
  
 def create_table_if_missing():
@@ -482,9 +491,6 @@ draw_html = r"""
 <html>
     <head>
         <meta charset="utf-8" />
-        <!-- ChemDoodle Web Components - replace URLs with your licensed copy or the official CDN as needed -->
-        <link rel="stylesheet" href="https://www.chemdoodle.com/assets/latest/ChemDoodleWeb.css" />
-        <script src="https://www.chemdoodle.com/assets/latest/ChemDoodleWeb.js"></script>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
         <style>
             body{background:#0b0b0b;color:#f7f7f7;font-family:Inter,Arial,Helvetica,sans-serif;margin:12px}
@@ -591,14 +597,21 @@ draw_html = r"""
                     }
 
                     document.addEventListener('DOMContentLoaded', function(){
-                        // try to load ketcher scripts from unpkg as a convenience — if blocked, user should host
-                        // Note: in production you should vendor these or use ketcher-react / ketcher-standalone properly.
-                        var script = document.createElement('script');
-                        script.src = 'https://unpkg.com/ketcher-standalone@latest/dist/ketcher.min.js';
-                        script.crossOrigin = 'anonymous';
-                        script.onload = function(){ setTimeout(initKetcher, 250); };
-                        script.onerror = function(){ console.warn('Failed to load Ketcher script from unpkg'); setTimeout(initKetcher, 250); };
-                        document.head.appendChild(script);
+                            // Try multiple CDNs for Ketcher sequentially for better availability
+                            var cdnUrls = [
+                                'https://unpkg.com/ketcher-standalone@latest/dist/ketcher.min.js',
+                                'https://cdn.jsdelivr.net/npm/ketcher-standalone@latest/dist/ketcher.min.js'
+                            ];
+                            function tryLoad(urls, idx){
+                                if(idx >= urls.length){ setTimeout(initKetcher, 250); return; }
+                                var s = document.createElement('script');
+                                s.src = urls[idx];
+                                s.crossOrigin = 'anonymous';
+                                s.onload = function(){ setTimeout(initKetcher, 250); };
+                                s.onerror = function(){ tryLoad(urls, idx+1); };
+                                document.head.appendChild(s);
+                            }
+                            tryLoad(cdnUrls, 0);
 
                         document.getElementById('get').onclick = async function(){
                             var s = await getSmiles();
@@ -645,32 +658,27 @@ draw_html = r"""
 
 tabs_placeholder, draw_tab = st.tabs(["Search", "Draw"])
 with draw_tab:
-        st.components.v1.html(draw_html, height=640)
+    st.components.v1.html(draw_html, height=640)
 
 sidebar = st.sidebar
 sidebar.title("Controls")
 
-# Account/Login button under Controls
-if LOGIN_LIB_AVAILABLE:
-    if 'show_login_ui' not in st.session_state:
-        st.session_state['show_login_ui'] = False
+# Initialize the login UI flag if missing
+if 'show_login_ui' not in st.session_state:
+    st.session_state['show_login_ui'] = False
 
-    if sidebar.button('Account / Login'):
-        st.session_state['show_login_ui'] = True
-
-    # When login UI requested, render the login UI (it manages its own state)
-    if st.session_state.get('show_login_ui'):
+# Render the login UI when requested. If the optional login lib is missing, show a helpful message.
+if st.session_state.get('show_login_ui'):
+    if LOGIN_LIB_AVAILABLE:
         try:
             login_obj = __login__(auth_token=LOGIN_AUTH_TOKEN or '', company_name='MidMol', width=200, height=220, logout_button_name='Logout', hide_menu_bool=True, hide_footer_bool=True)
             logged = login_obj.build_login_ui()
-            # If logged in, show a small confirmation
             if logged:
                 sidebar.markdown(f"**Logged in**")
         except Exception as e:
             st.error("Login UI failed to initialize: " + str(e))
-else:
-    # show a disabled account button if lib missing
-    sidebar.button('Account / Login (install login lib)')
+    else:
+        st.error('Login UI library not installed. To enable accounts install `streamlit_login_auth_ui` or set up an alternative auth flow.')
 
 # If logged in (by the login UI) provide account SMILES save/load controls in the Controls sidebar.
 if st.session_state.get('LOGGED_IN'):
@@ -881,4 +889,14 @@ with st.expander("Quick tips"):
     - You can search by IUPAC or common name (e.g. `aspirin`, `glucose`).
     - Compounds with ionic formulas (e.g., salts) will trigger an automatic search for crystal structures in the Crystallography Open Database (COD), but it will probably not work.
     """)
+
+# Floating bottom Account / Login button. Click reloads with ?login=1 which opens the login UI.
+floating_html = r"""
+<style>
+#mm_login_btn { position: fixed; left: 12px; bottom: 12px; z-index: 9999; }
+#mm_login_btn a { display:inline-block; padding:10px 14px; background:linear-gradient(180deg,#111,#0b0b0b); color:#fff; border:1px solid rgba(255,255,255,0.06); border-radius:10px; text-decoration:none; font-weight:600; font-family:Inter, Arial, sans-serif }
+</style>
+<div id="mm_login_btn"><a href="?login=1">Account / Login</a></div>
+"""
+st.markdown(floating_html, unsafe_allow_html=True)
 
