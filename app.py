@@ -664,7 +664,7 @@ if do_search:
                     "cid": cid,
                     "pref_name": comp.iupac_name or (comp.synonyms[0] if comp.synonyms else comp.title),
                     "common_names": comp.synonyms or [],
-                    "smiles": comp.isomeric_smiles or comp.smiles,
+                    "smiles": comp.smiles or comp.smiles,
                     "inchi": comp.inchi,
                     "formula": normalize_formula(comp.molecular_formula),
                     "mol_weight": comp.molecular_weight,
