@@ -749,18 +749,35 @@ if do_search:
 
         with right_col:
             
-            img_bytes = None
-            if result.get("smiles"):
-                img_bytes = rdkit_2d_image(result["smiles"])
-            if not img_bytes:
-                try:
-                    img_bytes = pubchem_2d_image(result["cid"], width=480, height=360)
-                except Exception:
-                    img_bytes = None
-            if img_bytes:
-                st.image(img_bytes, caption="2D structure", width="stretch")
-            else:
-                st.write("2D structure not available.")
+                img_bytes = None
+                if result.get("smiles"):
+                    try:
+                        # RDKit may return None or an object whose truthiness triggers
+                        # exotic behavior; catch exceptions and treat only explicit
+                        # None as "no image" so we don't call __bool__/__len__ on
+                        # unexpected objects.
+                        img_bytes = rdkit_2d_image(result["smiles"])
+                    except Exception as e:
+                        st.warning(f"RDKit failed to render SMILES: {e}")
+                        img_bytes = None
+
+                # Only consider a real None or empty bytes as missing image; avoid
+                # using `if not img_bytes` which can call __len__/__bool__ on
+                # non-bytes objects and raise the TypeError you saw.
+                missing_image = img_bytes is None or (isinstance(img_bytes, (bytes, bytearray)) and len(img_bytes) == 0)
+                if missing_image:
+                    try:
+                        if result.get("cid"):
+                            img_bytes = pubchem_2d_image(result["cid"], width=480, height=360)
+                    except Exception as e:
+                        st.warning(f"PubChem image fetch failed: {e}")
+                        img_bytes = None
+
+                if isinstance(img_bytes, (bytes, bytearray)) and len(img_bytes) > 0:
+                    # use_column_width=True makes the image fill the column nicely
+                    st.image(img_bytes, caption="2D structure", use_column_width=True)
+                else:
+                    st.write("2D structure not available.")
 
             
             sdf_text = None
