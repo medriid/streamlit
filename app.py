@@ -615,22 +615,9 @@ draw_html = ketcher_script_tag + r"""
                         getSmiles().then(function(s){ document.getElementById('smiles').textContent = s || '(empty)'; });
                     }
 
-                    document.addEventListener('DOMContentLoaded', function(){
-                            // Try multiple CDNs for Ketcher sequentially for better availability
-                            var cdnUrls = [
-                                'https://unpkg.com/ketcher-standalone@latest/dist/ketcher.min.js',
-                                'https://cdn.jsdelivr.net/npm/ketcher-standalone@latest/dist/ketcher.min.js'
-                            ];
-                            function tryLoad(urls, idx){
-                                if(idx >= urls.length){ setTimeout(initKetcher, 250); return; }
-                                var s = document.createElement('script');
-                                s.src = urls[idx];
-                                s.crossOrigin = 'anonymous';
-                                s.onload = function(){ setTimeout(initKetcher, 250); };
-                                s.onerror = function(){ tryLoad(urls, idx+1); };
-                                document.head.appendChild(s);
-                            }
-                            tryLoad(cdnUrls, 0);
+                        document.addEventListener('DOMContentLoaded', function(){
+                            // Ketcher is inlined into the page (vendored) so initialize directly.
+                            setTimeout(initKetcher, 250);
 
                         document.getElementById('get').onclick = async function(){
                             var s = await getSmiles();
