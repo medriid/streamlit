@@ -246,12 +246,12 @@ seed_button = sidebar.button("Seed DB (run small seed)")
 if theme_choice.startswith("Light"):
     
     st.components.v1.html(
-        "<style>body{background:
+        "<style>body{background:#ffffff;color:#0b0b0b} .molevis-card{background:rgba(0,0,0,0.03);color:inherit}</style>",
         height=0
     )
 else:
     st.components.v1.html(
-        "<style>body{background:
+        "<style>body{background:#0b0b0b;color:#f7f7f7} .molevis-card{background:rgba(255,255,255,0.02);color:inherit}</style>",
         height=0
     )
 
@@ -364,7 +364,7 @@ if do_search:
         
         left_col, right_col = st.columns([1, 1])
         with left_col:
-            st.markdown(f"
+            st.markdown(f"### {result.get('pref_name') or 'CID ' + str(result['cid'])}")
             st.write("**CID:**", result["cid"])
             st.write("**Formula:**", result.get("formula"))
             st.write("**Mol. weight:**", result.get("mol_weight"))
