@@ -478,8 +478,9 @@ draw_html = r"""
 <html>
     <head>
         <meta charset="utf-8" />
-        <!-- JSME editor (hosted) -->
-        <script src="https://peter-ertl.com/jsme/JSME_2018-12-16/jsme/jsme.nocache.js"></script>
+        <!-- ChemDoodle Web Components - replace URLs with your licensed copy or the official CDN as needed -->
+        <link rel="stylesheet" href="https://www.chemdoodle.com/assets/latest/ChemDoodleWeb.css" />
+        <script src="https://www.chemdoodle.com/assets/latest/ChemDoodleWeb.js"></script>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
         <style>
             body{background:#0b0b0b;color:#f7f7f7;font-family:Inter,Arial,Helvetica,sans-serif;margin:12px}
@@ -489,6 +490,8 @@ draw_html = r"""
             .btn:active{transform:translateY(1px)}
             pre.box{white-space:pre-wrap;color:#e6e6e6;background:#070707;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.03)}
             .muted{color:rgba(255,255,255,0.6);font-size:13px}
+            #sketcher { border: 1px solid rgba(255,255,255,0.04); border-radius:8px; background: #ffffff00 }
+            .notice { margin-top:8px; color: #cfcfcf; font-size:13px }
         </style>
     </head>
     <body>
@@ -496,17 +499,16 @@ draw_html = r"""
             <div class="toolbar">
                 <button class="btn" id="get">Get SMILES & lookup PubChem</button>
                 <button class="btn" id="copy">Copy SMILES</button>
-                <button class="btn" id="addC">Add carbon (C)</button>
-                <button class="btn" id="addDouble">Make last bond double</button>
-                <button class="btn" id="addBr">Append Br</button>
-                <button class="btn" id="addCl">Append Cl</button>
-                <button class="btn" id="addF">Append F</button>
+                <button class="btn" id="replaceBr">Replace selection with Br</button>
+                <button class="btn" id="replaceCl">Replace selection with Cl</button>
+                <button class="btn" id="replaceI">Replace selection with I</button>
                 <div style="flex:1"></div>
-                <div class="muted">Tip: Use the built-in editor tools (select, bond, atom) for fine edits. The buttons are convenience helpers.</div>
+                <div class="muted">Using ChemDoodle Web Components — confirm your license/hosting before deployment.</div>
             </div>
-            <div id="applet_container" style="width:100%;height:420px;max-width:900px;margin-bottom:8px"></div>
 
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+            <div id="sketcher"></div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
                 <div>
                     <strong>SMILES</strong>
                     <pre id="smiles" class="box">(empty)</pre>
@@ -516,39 +518,79 @@ draw_html = r"""
                     <pre id="names" class="box">(none)</pre>
                 </div>
             </div>
+            <div class="notice">If ChemDoodle fails to load, ensure the script/CSS URLs are reachable or host a local copy. Alternative editors: Ketcher (open-source).</div>
         </div>
+
         <script>
-            // JSME will call window.jsmeOnLoad when ready
-            var jsmeApplet = null;
-            function jsmeOnLoad() {
+            // Defensive deployment: attempt to create ChemDoodle Sketcher if available
+            var sketcher = null;
+            function initSketcher(){
                 try{
-                    jsmeApplet = new JSME('applet_container','100%','420px');
-                }catch(e){ console.error('JSME load failed', e); }
+                    if(window.ChemDoodle && ChemDoodle.SketcherCanvas){
+                        // width calculated to fit container; set a reasonable height
+                        var el = document.getElementById('sketcher');
+                        var w = Math.min(window.innerWidth - 80, 900);
+                        var h = 420;
+                        sketcher = new ChemDoodle.SketcherCanvas('sketcher', w, h, {useServices:false});
+                    } else {
+                        console.warn('ChemDoodle not available');
+                        document.getElementById('sketcher').innerHTML = '<div style="padding:20px;color:#cfcfcf">ChemDoodle failed to load. Check your script/CSS URLs or use an alternative editor (Ketcher).</div>';
+                    }
+                }catch(e){
+                    console.error('initSketcher error', e);
+                    document.getElementById('sketcher').innerHTML = '<div style="padding:20px;color:#cfcfcf">Sketcher initialization error.</div>';
+                }
             }
 
-            function safeGetSmiles(){ try{ return jsmeApplet && jsmeApplet.smiles ? jsmeApplet.getSmiles() || '' : (jsmeApplet && jsmeApplet.getSmiles ? jsmeApplet.getSmiles()||'' : ''); }catch(e){return '';}}
-            function safeSetSmiles(s){ try{ if(jsmeApplet && (jsmeApplet.setSmiles || jsmeApplet.readString)){
-                        if(jsmeApplet.setSmiles) jsmeApplet.setSmiles(s);
-                        else if(jsmeApplet.readString) jsmeApplet.readString(s);
-                    } else if(jsmeApplet && jsmeApplet.setSmiles){ jsmeApplet.setSmiles(s); } }
-                catch(e){ console.warn('setSmiles failed', e); }}
+            function getSmiles(){
+                try{
+                    if(!sketcher) return '';
+                    // try common ChemDoodle APIs defensively
+                    if(typeof sketcher.getSmiles === 'function') return sketcher.getSmiles();
+                    if(window.ChemDoodle && ChemDoodle.writeSMILES){
+                        var mol = sketcher.getMolecule ? sketcher.getMolecule() : null;
+                        if(mol) return ChemDoodle.writeSMILES(mol);
+                    }
+                    return '';
+                }catch(e){ console.warn('getSmiles failed', e); return ''; }
+            }
+
+            function setSmiles(smiles){
+                try{
+                    if(!sketcher) return;
+                    if(typeof sketcher.loadMolecule === 'function'){
+                        sketcher.loadMolecule(smiles);
+                        return;
+                    }
+                    if(typeof sketcher.setMolecule === 'function'){
+                        sketcher.setMolecule(ChemDoodle.readSMILES(smiles));
+                        return;
+                    }
+                    // fallback: attempt to read using ChemDoodle.io
+                    if(window.ChemDoodle && ChemDoodle.readSMILES){
+                        var mol = ChemDoodle.readSMILES(smiles);
+                        if(mol && sketcher.setMolecule) sketcher.setMolecule(mol);
+                    }
+                }catch(e){ console.warn('setSmiles failed', e); }
+            }
 
             function updateDisplay(){
-                var s = '';
-                try{ s = (jsmeApplet && jsmeApplet.getSmiles) ? jsmeApplet.getSmiles() : ''; }catch(e){ s=''; }
+                var s = getSmiles() || '';
                 document.getElementById('smiles').textContent = s || '(empty)';
             }
 
             document.addEventListener('DOMContentLoaded', function(){
+                // init after a short delay to allow scripts to load
+                setTimeout(initSketcher, 400);
+
                 document.getElementById('get').onclick = async function(){
-                    if(!jsmeApplet){ alert('Editor not ready yet.'); return; }
+                    var s = getSmiles();
+                    document.getElementById('smiles').textContent = s || '(empty)';
+                    if(!s){ document.getElementById('names').textContent = 'No SMILES to lookup.'; return; }
+                    var enc = encodeURIComponent(s);
+                    var url = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/' + enc + '/synonyms/JSON';
+                    document.getElementById('names').textContent = 'Looking up...';
                     try{
-                        var s = safeGetSmiles();
-                        document.getElementById('smiles').textContent = s || '(empty)';
-                        if(!s){ document.getElementById('names').textContent = 'No SMILES to lookup.'; return; }
-                        var enc = encodeURIComponent(s);
-                        var url = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/' + enc + '/synonyms/JSON';
-                        document.getElementById('names').textContent = 'Looking up...';
                         var res = await fetch(url, {method:'GET'});
                         if(!res.ok){ document.getElementById('names').textContent = 'No PubChem entry found.'; return; }
                         var j = await res.json();
@@ -558,45 +600,39 @@ draw_html = r"""
                             if(syns.length===0) document.getElementById('names').textContent = 'No synonyms returned by PubChem.';
                             else document.getElementById('names').textContent = syns.slice(0,12).join('\n');
                         }catch(e){ document.getElementById('names').textContent = 'Failed to parse PubChem response.'; }
-                    }catch(e){ document.getElementById('names').textContent = 'Editor error: '+String(e); }
+                    }catch(e){ document.getElementById('names').textContent = 'Lookup failed: '+String(e); }
                 };
 
                 document.getElementById('copy').onclick = function(){
-                    var t = document.getElementById('smiles').textContent || '';
+                    var t = getSmiles() || '';
                     navigator.clipboard && navigator.clipboard.writeText(t);
                 };
 
-                // convenience helpers that operate on SMILES text and attempt to set it back
-                function appendFragment(f){
+                function replaceSelectionWith(symbol){
                     try{
-                        var s = safeGetSmiles() || '';
-                        var ns = s + f;
-                        safeSetSmiles(ns);
-                        updateDisplay();
-                    }catch(e){ console.warn(e); }
+                        if(!sketcher) { appendFragment(symbol); return; }
+                        // attempt to use selection APIs
+                        if(typeof sketcher.getSelectedAtom === 'function'){
+                            var a = sketcher.getSelectedAtom();
+                            if(a){ a.label = symbol; sketcher.repaint(); updateDisplay(); return; }
+                        }
+                        // ChemDoodle sometimes exposes selection via sketcher.selected
+                        if(sketcher.selected && sketcher.selected.atom){
+                            sketcher.selected.atom.label = symbol; sketcher.repaint(); updateDisplay(); return; }
+                        // fallback: append
+                        appendFragment(symbol);
+                    }catch(e){ console.warn('replaceSelection failed', e); appendFragment(symbol); }
                 }
 
-                document.getElementById('addC').onclick = function(){ appendFragment('C'); };
-                document.getElementById('addBr').onclick = function(){ appendFragment('Br'); };
-                document.getElementById('addCl').onclick = function(){ appendFragment('Cl'); };
-                document.getElementById('addF').onclick = function(){ appendFragment('F'); };
+                function appendFragment(f){
+                    try{ var s = getSmiles() || ''; var ns = s + f; setSmiles(ns); updateDisplay(); }catch(e){ console.warn(e); }
+                }
 
-                document.getElementById('addDouble').onclick = function(){
-                    try{
-                        var s = safeGetSmiles() || '';
-                        if(!s){ return; }
-                        // naive: replace last occurrence of two atoms without '=' between them with a '=' inserted
-                        // e.g. CC -> C=C, COC -> CO=C (best-effort)
-                        var ns = s.replace(/([A-Za-z0-9@\[\]\(\)]+)([A-Za-z0-9@\[\]\(\)]+)$/, '$1=$2');
-                        if(ns===s){ // fallback: just append =
-                            ns = s + '=';
-                        }
-                        safeSetSmiles(ns);
-                        updateDisplay();
-                    }catch(e){ console.warn('make double failed', e); }
-                };
+                document.getElementById('replaceBr').onclick = function(){ replaceSelectionWith('Br'); };
+                document.getElementById('replaceCl').onclick = function(){ replaceSelectionWith('Cl'); };
+                document.getElementById('replaceI').onclick = function(){ replaceSelectionWith('I'); };
 
-                // update display periodically in case user edits in the applet
+                // periodic display update
                 setInterval(updateDisplay, 800);
             });
         </script>
