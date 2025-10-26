@@ -29,7 +29,17 @@ import pubchempy as pcp
 import re
 import urllib.parse
 CRYSTAL_SERVICE_URL = os.environ.get("CRYSTAL_SERVICE_URL")
-LOGIN_AUTH_TOKEN = os.environ.get("LOGIN_AUTH_TOKEN")
+try:
+    # Prefer a Courier/secret token from Streamlit secrets when available
+    LOGIN_AUTH_TOKEN = None
+    try:
+        LOGIN_AUTH_TOKEN = st.secrets.get("COURIER_AUTH_TOKEN") if hasattr(st, 'secrets') else None
+    except Exception:
+        LOGIN_AUTH_TOKEN = None
+    if not LOGIN_AUTH_TOKEN:
+        LOGIN_AUTH_TOKEN = os.environ.get("LOGIN_AUTH_TOKEN")
+except Exception:
+    LOGIN_AUTH_TOKEN = os.environ.get("LOGIN_AUTH_TOKEN")
 
 try:
     from streamlit_login_auth_ui.widgets import __login__
@@ -668,14 +678,34 @@ if 'show_login_ui' not in st.session_state:
 if st.session_state.get('show_login_ui'):
     if LOGIN_LIB_AVAILABLE:
         try:
+            if not LOGIN_AUTH_TOKEN:
+                st.warning("Login library available but no Courier auth token configured. Password-reset emails may not work. Set COURIER_AUTH_TOKEN in secrets or LOGIN_AUTH_TOKEN in env.")
             login_obj = __login__(auth_token=LOGIN_AUTH_TOKEN or '', company_name='MidMol', width=200, height=220, logout_button_name='Logout', hide_menu_bool=True, hide_footer_bool=True)
             logged = login_obj.build_login_ui()
             if logged:
-                sidebar.markdown(f"**Logged in**")
+                # The library returns True on successful login. Mirror that into our session state.
+                st.session_state['LOGGED_IN'] = True
+                # If a username was captured elsewhere by the lib it might be in session state; otherwise keep account_username as-is.
+                if not st.session_state.get('account_username'):
+                    st.session_state['account_username'] = st.session_state.get('username', '') or st.session_state.get('user', '') or ''
+                sidebar.markdown("**Logged in**")
         except Exception as e:
             st.error("Login UI failed to initialize: " + str(e))
     else:
-        st.error('Login UI library not installed. To enable accounts install `streamlit_login_auth_ui` or set up an alternative auth flow.')
+        # Provide a lightweight Streamlit-only fallback login when the optional package isn't installed.
+        st.warning('Login UI library not installed — using lightweight fallback login. This fallback stores only a username in session state and is intended for demos, not production.')
+        with st.form('fallback_login'):
+            fb_user = st.text_input('Username', value=st.session_state.get('account_username',''), key='fallback_username')
+            submitted = st.form_submit_button('Login (fallback)')
+            if submitted:
+                if not fb_user or not fb_user.strip():
+                    st.error('Please enter a username to continue.')
+                else:
+                    st.session_state['LOGGED_IN'] = True
+                    st.session_state['account_username'] = fb_user.strip()
+                    st.success(f"Logged in as {fb_user.strip()}")
+                    # close the login UI
+                    st.session_state['show_login_ui'] = False
 
 if st.session_state.get('LOGGED_IN'):
     sidebar.markdown("---")
@@ -885,7 +915,9 @@ with st.expander("Quick tips"):
     """)
 
 # Place Account / Login at the bottom of the Controls sidebar
-sidebar.markdown("<div style='position:relative; padding-top:8px; margin-top:12px;'><a href='?login=1' style='display:block;margin-top:auto;padding:10px 14px;background:linear-gradient(180deg,#111,#0b0b0b);color:#fff;border:1px solid rgba(255,255,255,0.06);border-radius:10px;text-decoration:none;font-weight:600;font-family:Inter, Arial, sans-serif;text-align:center'>Account / Login</a></div>", unsafe_allow_html=True)
+# Place a native Streamlit button at the end of the sidebar to open the Login / Account UI.
+if sidebar.button('Account / Login'):
+    st.session_state['show_login_ui'] = True
 
 
 
