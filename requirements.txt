@@ -1,1 +1,10 @@
 streamlit
+requests
+pubchempy
+py3Dmol
+psycopg2-binary
+sqlalchemy
+python-dotenv
+pandas
+Pillow
+rdkit-pypi==2024.9.5
