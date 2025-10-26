@@ -3,14 +3,12 @@
 @tailwind utilities;
 
 
-/* minimal custom styles */
 :root {
 --bg: #0b0b0b;
 --fg: #f7f7f7;
 }
 
 
-/* fallback small CSS for Streamlit injection in case built CSS not available */
 .molevis-root {
 	background-color: var(--bg);
 	color: var(--fg);
@@ -24,7 +22,6 @@
 	border-radius: 12px;
 }
 
-/* Global typographic tweaks */
 body {
 	background: linear-gradient(180deg, #0b0b0b 0%, #070707 100%);
 	color: #f7f7f7;
@@ -35,7 +32,6 @@ body {
 .molevis-small { font-size:13px; color: rgba(255,255,255,0.7) }
 .flat-btn { background: transparent; border: 1px solid rgba(255,255,255,0.06); padding:6px 10px; border-radius:8px; color:inherit }
 
-/* Cards and panels */
 .panel {
 	background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
 	border-radius: 12px;

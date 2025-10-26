@@ -14,7 +14,6 @@ class CIFPayload(BaseModel):
 
 @app.post("/convert/cif")
 async def convert_cif(payload: CIFPayload):
-    """Convert CIF text to an XYZ string (simple conversion)."""
     cif_text = payload.cif
     try:
         struct = Structure.from_str(cif_text, fmt="cif")

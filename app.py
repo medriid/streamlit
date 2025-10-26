@@ -234,6 +234,13 @@ def pubchem_fetch_by_name(name: str):
     except Exception:
         return None
 
+def pubchem_fetch_by_smiles(smiles: str):
+    try:
+        comps = pcp.get_compounds(smiles, 'smiles')
+        return comps[0] if comps else None
+    except Exception:
+        return None
+
 def pubchem_fetch_by_cid(cid: int):
     try:
         return pcp.Compound.from_cid(cid)
@@ -641,15 +648,62 @@ if do_search:
     if not result:
         
         comp = None
-        
+
         q = search_query.strip()
         if q.isdigit():
             comp = pubchem_fetch_by_cid(int(q))
+
         if not comp:
-            comp = pubchem_fetch_by_name(search_query)
+            try:
+                comp = pubchem_fetch_by_smiles(q)
+            except Exception:
+                comp = None
+
         if not comp:
-            st.warning("No result found on PubChem for that query.")
+            comp = pubchem_fetch_by_name(q)
+
+        if not comp:
             result = None
+            local_smiles = q
+            try:
+                from rdkit import Chem
+                m = Chem.MolFromSmiles(local_smiles)
+            except Exception:
+                m = None
+
+            if m:
+                try:
+                    from rdkit.Chem import rdMolDescriptors
+                    formula = rdMolDescriptors.CalcMolFormula(m)
+                except Exception:
+                    formula = None
+                try:
+                    mw = rdMolDescriptors.CalcExactMolWt(m)
+                except Exception:
+                    mw = None
+                try:
+                    inchi = Chem.MolToInchi(m)
+                except Exception:
+                    inchi = None
+
+                img_bytes = rdkit_2d_image(local_smiles)
+
+                sdf_text = rdkit_generate_3d_sdf(local_smiles)
+
+                result = {
+                    "cid": None,
+                    "pref_name": None,
+                    "common_names": [],
+                    "smiles": local_smiles,
+                    "inchi": inchi,
+                    "formula": normalize_formula(formula) if formula else None,
+                    "mol_weight": float(mw) if mw is not None else None,
+                    "sdf": sdf_text.encode() if sdf_text else None,
+                    "source": "local"
+                }
+            else:
+                st.warning("No result found on PubChem for that query.")
+                result = None
         else:
             cid = int(comp.cid)
             
@@ -756,7 +810,6 @@ if do_search:
                         except Exception as e:
                             st.error("Found a CIF on COD but failed to render it: " + str(e))
                     else:
-                        # Try PubChem 3D JSON fallback -> XYZ
                         pubchem_xyz = None
                         try:
                             with st.spinner("No CIF found — attempting PubChem 3D fallback..."):
