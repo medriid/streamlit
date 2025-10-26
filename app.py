@@ -496,7 +496,6 @@ st.title("Mid Molecule Thing")
 
 inject_css()
 
-# Use Streamlit's official molecule editor component when available.
 try:
     from streamlit_ketcher import st_ketcher
     KETCHER_AVAILABLE = True
@@ -508,10 +507,6 @@ tabs_placeholder, draw_tab = st.tabs(["Search", "Draw"])
 with draw_tab:
     if KETCHER_AVAILABLE:
         try:
-            # Best-effort: try to style the component iframe background to a light grey.
-            # Some Streamlit components render inside an iframe; CSS injected here
-            # targets likely iframe titles used by streamlit components. If the
-            # component supports a background/theme argument we also attempt to pass it.
             try:
                 st.markdown(
                     """
@@ -523,18 +518,15 @@ with draw_tab:
                     unsafe_allow_html=True,
                 )
             except Exception:
-                # non-fatal; continue to render editor
                 pass
-
-            # Try to pass a background argument to the component if it accepts one.
             try:
                 smiles = st_ketcher(background_color="#f0f0f0")
             except TypeError:
                 try:
-                    # Some versions may use different kwarg names; try a couple.
+                    
                     smiles = st_ketcher(theme="light", background="#f0f0f0")
                 except TypeError:
-                    # Last resort: call with no extra args.
+                
                     smiles = st_ketcher()
 
             st.markdown("**SMILES from editor**")
@@ -564,7 +556,7 @@ if st.session_state.get('show_login_ui'):
             login_obj = __login__(auth_token=LOGIN_AUTH_TOKEN or '', company_name='MidMol', width=200, height=220, logout_button_name='Logout', hide_menu_bool=True, hide_footer_bool=True)
             logged = login_obj.build_login_ui()
             if logged:
-                # Mirror library login into our session state.
+            
                 st.session_state['LOGGED_IN'] = True
                 if not st.session_state.get('account_username'):
                     st.session_state['account_username'] = st.session_state.get('username', '') or st.session_state.get('user', '') or ''
@@ -572,7 +564,7 @@ if st.session_state.get('show_login_ui'):
         except Exception as e:
             st.error("Login UI failed to initialize: " + str(e))
     else:
-        # No fallback form: instruct to install the optional package. We removed the lightweight fallback as requested.
+        
         st.error('Login UI library not installed. To enable accounts install `streamlit-login-auth-ui` or set up an alternative auth flow.')
 
 if st.session_state.get('LOGGED_IN'):
@@ -756,7 +748,7 @@ if do_search:
                         except Exception as e:
                             st.error("Found a CIF on COD but failed to render it: " + str(e))
                     else:
-                        # Try PubChem 3D JSON fallback -> XYZ
+                        
                         pubchem_xyz = None
                         try:
                             with st.spinner("No CIF found — attempting PubChem 3D fallback..."):
