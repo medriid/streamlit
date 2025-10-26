@@ -662,12 +662,11 @@ with draw_tab:
 
 sidebar = st.sidebar
 sidebar.title("Controls")
+sidebar.markdown("<div style='position:sticky; bottom:12px; padding-top:8px;'><a href='?login=1' style='display:inline-block;padding:10px 14px;background:linear-gradient(180deg,#111,#0b0b0b);color:#fff;border:1px solid rgba(255,255,255,0.06);border-radius:10px;text-decoration:none;font-weight:600;font-family:Inter, Arial, sans-serif'>Account / Login</a></div>", unsafe_allow_html=True)
 
-# Initialize the login UI flag if missing
 if 'show_login_ui' not in st.session_state:
     st.session_state['show_login_ui'] = False
 
-# Render the login UI when requested. If the optional login lib is missing, show a helpful message.
 if st.session_state.get('show_login_ui'):
     if LOGIN_LIB_AVAILABLE:
         try:
@@ -680,11 +679,9 @@ if st.session_state.get('show_login_ui'):
     else:
         st.error('Login UI library not installed. To enable accounts install `streamlit_login_auth_ui` or set up an alternative auth flow.')
 
-# If logged in (by the login UI) provide account SMILES save/load controls in the Controls sidebar.
 if st.session_state.get('LOGGED_IN'):
     sidebar.markdown("---")
     sidebar.markdown("### Account")
-    # Ask user for their account username (the login UI stores usernames in _secret_auth_.json)
     acct_user = sidebar.text_input('Account username (enter your login username)', value=st.session_state.get('account_username', ''))
     st.session_state['account_username'] = acct_user
     acct_smiles = sidebar.text_area('SMILES to save to account (paste or copy from Draw tab)', value='', key='acct_smiles')
@@ -700,7 +697,6 @@ if st.session_state.get('LOGGED_IN'):
             else:
                 sidebar.error('Failed to save SMILES.')
 
-    # Show saved smiles and allow loading into the search box
     saved = get_smiles_for_user(acct_user) if acct_user else []
     if saved:
         sel = sidebar.selectbox('Your saved SMILES', options=['(choose)'] + saved)
@@ -718,7 +714,7 @@ if "search_query" not in st.session_state:
 if "do_search" not in st.session_state:
     st.session_state["do_search"] = False
 
-search_query = sidebar.text_input("Search (IUPAC or common name)", value=st.session_state["search_query"], key="search_query", on_change=_trigger_search)
+search_query = sidebar.text_input("Search (IUPAC or common name)", key="search_query", on_change=_trigger_search)
 
 selected_suggestion = None
 
