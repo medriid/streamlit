@@ -91,7 +91,7 @@ inject_css()
 
 # If the page was loaded with ?login=1, open the login UI and then clear the query param
 try:
-    qp = st.experimental_get_query_params()
+    qp = st.query_params
     if qp and qp.get("login"):
         st.session_state['show_login_ui'] = True
         st.experimental_set_query_params()
