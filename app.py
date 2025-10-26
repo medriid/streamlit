@@ -472,6 +472,72 @@ def pubchem3d_to_xyz(cid: int) -> Optional[str]:
 
 st.title("Mid Molecule Thing")
 
+# Drawing tab: embed a lightweight JS molecule editor (JSME) and lookup PubChem names by SMILES.
+draw_html = r"""
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <!-- JSME editor (hosted) -->
+        <script src="https://peter-ertl.com/jsme/JSME_2018-12-16/jsme/jsme.nocache.js"></script>
+        <style>body{background:#0b0b0b;color:#fff;font-family:Arial,Helvetica,sans-serif} .panel{padding:12px;border-radius:8px;background:#101010}</style>
+    </head>
+    <body>
+        <div class="panel">
+            <div id="applet_container" style="width:100%;height:420px;max-width:900px;margin-bottom:8px"></div>
+            <button id="get" style="margin-right:8px">Get SMILES & lookup PubChem</button>
+            <button id="copy">Copy SMILES</button>
+            <div style="margin-top:10px">
+                <strong>SMILES:</strong>
+                <pre id="smiles" style="white-space:pre-wrap;color:#ddd;background:#0b0b0b;padding:8px;border-radius:6px"></pre>
+            </div>
+            <div style="margin-top:8px">
+                <strong>PubChem names (top results):</strong>
+                <pre id="names" style="white-space:pre-wrap;color:#ddd;background:#0b0b0b;padding:8px;border-radius:6px"></pre>
+            </div>
+        </div>
+        <script>
+            // JSME will call window.jsmeOnLoad when ready
+            var jsmeApplet = null;
+            function jsmeOnLoad() {
+                jsmeApplet = new JSME('applet_container','100%','420px');
+            }
+            document.addEventListener('DOMContentLoaded', function(){
+                document.getElementById('get').onclick = async function(){
+                    if(!jsmeApplet){ alert('Editor not ready yet.'); return; }
+                    try{
+                        var s = jsmeApplet.getSmiles();
+                        document.getElementById('smiles').textContent = s || '(empty)';
+                        if(!s){ document.getElementById('names').textContent = 'No SMILES to lookup.'; return; }
+                        // Query PubChem for synonyms by SMILES
+                        var enc = encodeURIComponent(s);
+                        var url = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/' + enc + '/synonyms/JSON';
+                        document.getElementById('names').textContent = 'Looking up...';
+                        var res = await fetch(url, {method:'GET'});
+                        if(!res.ok){ document.getElementById('names').textContent = 'No PubChem entry found.'; return; }
+                        var j = await res.json();
+                        try{
+                            var info = j.InformationList.Information[0];
+                            var syns = info.Synonym || [];
+                            if(syns.length===0) document.getElementById('names').textContent = 'No synonyms returned by PubChem.';
+                            else document.getElementById('names').textContent = syns.slice(0,12).join('\n');
+                        }catch(e){ document.getElementById('names').textContent = 'Failed to parse PubChem response.'; }
+                    }catch(e){ document.getElementById('names').textContent = 'Editor error: '+String(e); }
+                };
+                document.getElementById('copy').onclick = function(){
+                    var t = document.getElementById('smiles').textContent || '';
+                    navigator.clipboard && navigator.clipboard.writeText(t);
+                };
+            });
+        </script>
+    </body>
+</html>
+"""
+
+tabs_placeholder, draw_tab = st.tabs(["Search", "Draw"])
+with draw_tab:
+        st.components.v1.html(draw_html, height=640)
+
 sidebar = st.sidebar
 sidebar.title("Controls")
 
