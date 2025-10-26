@@ -815,7 +815,7 @@ if do_search:
                 except Exception:
                     img_bytes = None
             if img_bytes:
-                st.image(img_bytes, caption="2D structure", use_container_width=True)
+                st.image(img_bytes, caption="2D structure", width="stretch")
             else:
                 st.write("2D structure not available.")
 
@@ -890,13 +890,5 @@ with st.expander("Quick tips"):
     - Compounds with ionic formulas (e.g., salts) will trigger an automatic search for crystal structures in the Crystallography Open Database (COD), but it will probably not work.
     """)
 
-# Floating bottom Account / Login button. Click reloads with ?login=1 which opens the login UI.
-floating_html = r"""
-<style>
-#mm_login_btn { position: fixed; left: 12px; bottom: 12px; z-index: 9999; }
-#mm_login_btn a { display:inline-block; padding:10px 14px; background:linear-gradient(180deg,#111,#0b0b0b); color:#fff; border:1px solid rgba(255,255,255,0.06); border-radius:10px; text-decoration:none; font-weight:600; font-family:Inter, Arial, sans-serif }
-</style>
-<div id="mm_login_btn"><a href="?login=1">Account / Login</a></div>
-"""
-st.markdown(floating_html, unsafe_allow_html=True)
+
 
