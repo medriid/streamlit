@@ -2,6 +2,7 @@
 import os
 import requests
 import base64
+import json
 from io import BytesIO
 from typing import Optional, Dict, Any, List
 
@@ -28,6 +29,14 @@ import pubchempy as pcp
 import re
 import urllib.parse
 CRYSTAL_SERVICE_URL = os.environ.get("CRYSTAL_SERVICE_URL")
+LOGIN_AUTH_TOKEN = os.environ.get("LOGIN_AUTH_TOKEN")
+
+try:
+    from streamlit_login_auth_ui.widgets import __login__
+    LOGIN_LIB_AVAILABLE = True
+except Exception:
+    __login__ = None
+    LOGIN_LIB_AVAILABLE = False
 
 
 def normalize_formula(formula: Optional[str]) -> Optional[str]:
@@ -62,7 +71,6 @@ st.set_page_config(page_title="Mid Molecule Thing", layout="wide", initial_sideb
 
 
 def inject_css():
-    
     try:
         with open("assets/styles.css", "r", encoding="utf8") as fh:
             css = fh.read()
@@ -70,7 +78,6 @@ def inject_css():
     except Exception:
         fallback = """
         <style>
-        body { background: 
         .molevis-card { background: rgba(255,255,255,0.02); padding: 14px; border-radius: 12px; }
         .molevis-muted { color: rgba(255,255,255,0.6) }
         .molevis-title { font-weight:700; font-size:22px }
@@ -85,29 +92,27 @@ inject_css()
 
  
 def create_table_if_missing():
-    """Create molecules table and pg_trgm extension if DB present."""
-    if not engine:
-        return
-    sql = """
-    CREATE EXTENSION IF NOT EXISTS pg_trgm;
-    CREATE TABLE IF NOT EXISTS molecules (
-      cid bigint PRIMARY KEY,
-      pref_name text,
-      common_names text[],
-      smiles text,
-      inchi text,
-      formula text,
-      mol_weight numeric,
-      sdf bytea,
-      created_at timestamptz DEFAULT now()
-    );
-    CREATE INDEX IF NOT EXISTS idx_molecules_prefname_trgm ON molecules USING gin (pref_name gin_trgm_ops);
-    """
-    with engine.begin() as conn:
-        conn.execute(text(sql))
+        if not engine:
+                return
+        sql = """
+        CREATE EXTENSION IF NOT EXISTS pg_trgm;
+        CREATE TABLE IF NOT EXISTS molecules (
+            cid bigint PRIMARY KEY,
+            pref_name text,
+            common_names text[],
+            smiles text,
+            inchi text,
+            formula text,
+            mol_weight numeric,
+            sdf bytea,
+            created_at timestamptz DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS idx_molecules_prefname_trgm ON molecules USING gin (pref_name gin_trgm_ops);
+        """
+        with engine.begin() as conn:
+                conn.execute(text(sql))
 
 def db_suggest(prefix: str, limit: int = 8) -> List[Dict[str, Any]]:
-    """Return list of suggestion dicts from DB matching prefix on pref_name or synonyms."""
     if not engine or not prefix:
         return []
     q = text("""
@@ -123,7 +128,6 @@ def db_suggest(prefix: str, limit: int = 8) -> List[Dict[str, Any]]:
     return [{"cid": int(r[0]), "name": r[1], "syn": r[2]} for r in rows]
 
 def db_get(cid: int) -> Optional[Dict[str, Any]]:
-    """Return molecule row from DB by CID (or None)."""
     if not engine:
         return None
     q = text("SELECT cid, pref_name, common_names, smiles, inchi, formula, mol_weight, sdf FROM molecules WHERE cid=:cid")
@@ -143,7 +147,6 @@ def db_get(cid: int) -> Optional[Dict[str, Any]]:
     }
 
 def db_insert(mol: Dict[str, Any]) -> None:
-    """Insert or update molecule into DB. mol should include keys: cid, pref_name, common_names (list), smiles, inchi, formula, mol_weight, sdf (bytes or str)"""
     if not engine:
         return
     metadata = sa.MetaData()
@@ -161,6 +164,42 @@ def db_insert(mol: Dict[str, Any]) -> None:
     stmt = insert(mol_table).values(**row).on_conflict_do_update(index_elements=['cid'], set_=row)
     with engine.begin() as conn:
         conn.execute(stmt)
+
+
+USER_SMILES_FILE = os.path.join(os.path.dirname(__file__), 'user_smiles.json')
+
+def _load_user_smiles() -> Dict[str, List[str]]:
+    try:
+        if os.path.exists(USER_SMILES_FILE):
+            with open(USER_SMILES_FILE, 'r', encoding='utf8') as fh:
+                return json.load(fh)
+    except Exception:
+        pass
+    return {}
+
+def _save_user_smiles(store: Dict[str, List[str]]):
+    try:
+        with open(USER_SMILES_FILE, 'w', encoding='utf8') as fh:
+            json.dump(store, fh, indent=2)
+    except Exception:
+        pass
+
+def add_smile_for_user(username: str, smiles: str) -> bool:
+    if not username or not smiles:
+        return False
+    store = _load_user_smiles()
+    lst = store.get(username, [])
+    if smiles not in lst:
+        lst.append(smiles)
+    store[username] = lst
+    _save_user_smiles(store)
+    return True
+
+def get_smiles_for_user(username: str) -> List[str]:
+    if not username:
+        return []
+    store = _load_user_smiles()
+    return store.get(username, [])
 
 
 if USE_DB:
@@ -206,11 +245,6 @@ def pubchem_get_synonyms(cid: int) -> List[str]:
 
 
 def is_probably_ionic(formula: Optional[str]) -> bool:
-    """Heuristic: return True if formula looks like an inorganic ionic salt.
-
-    We treat presence of alkali/alkaline-earth metals alongside non-metals
-    (e.g., halogens) as an indicator.
-    """
     if not formula:
         return False
     toks = re.findall(r'([A-Z][a-z]?)', formula)
@@ -239,7 +273,6 @@ def rdkit_2d_image(smiles: str, size=(400, 300)) -> Optional[bytes]:
         return None
 
 def rdkit_generate_3d_sdf(smiles: str) -> Optional[str]:
-    """Generate a 3D SDF text from SMILES using RDKit; returns MolBlock string or None."""
     try:
         from rdkit import Chem
         from rdkit.Chem import AllChem
@@ -255,7 +288,6 @@ def rdkit_generate_3d_sdf(smiles: str) -> Optional[str]:
 
 
 def sdf_to_py3dmol_html(sdf_text: str, width: int = 700, height: int = 480) -> str:
-    """Try to use py3Dmol if installed; otherwise return HTML using 3Dmol CDN."""
     try:
         import py3Dmol
         view = py3Dmol.view(width=width, height=height)
@@ -286,7 +318,6 @@ def sdf_to_py3dmol_html(sdf_text: str, width: int = 700, height: int = 480) -> s
 
 
 def render_3dmol_from_text(model_text: str, fmt: str = "sdf", width: int = 700, height: int = 480) -> str:
-    """Return HTML for a 3Dmol viewer with given model text and format (sdf, cif, xyz, pdb, etc.)."""
     safe_text = model_text.replace("\\", "\\\\").replace("\n", "\\n").replace("'", "\\'")
     html = f"""
     <html>
@@ -312,11 +343,6 @@ def render_3dmol_from_text(model_text: str, fmt: str = "sdf", width: int = 700, 
 
 
 def fetch_cif_from_cod(formula: Optional[str]) -> Optional[str]:
-    """Try to find and download a CIF from the Crystallography Open Database (COD) for the given formula.
-
-    This does a best-effort HTML search on COD and attempts to follow the first .cif link found.
-    Returns CIF text or None.
-    """
     if not formula:
         return None
     try:
@@ -350,7 +376,6 @@ def fetch_cif_from_cod(formula: Optional[str]) -> Optional[str]:
 
 
 def _atomic_number_to_symbol_map():
-    # Minimal mapping for common elements; extend if needed
     return {
         1: 'H', 2: 'He', 3: 'Li', 4: 'Be', 5: 'B', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 10: 'Ne',
         11: 'Na', 12: 'Mg', 13: 'Al', 14: 'Si', 15: 'P', 16: 'S', 17: 'Cl', 18: 'Ar',
@@ -359,31 +384,20 @@ def _atomic_number_to_symbol_map():
 
 
 def pubchem3d_to_xyz(cid: int) -> Optional[str]:
-    """Try to obtain 3D coordinates from PubChem record JSON and convert to XYZ text.
-
-    This is a best-effort parser: it recursively searches the returned JSON for a
-    list of atom-like dicts containing numeric x/y/z keys (or parallel arrays).
-    Returns an XYZ-formatted string or None.
-    """
     try:
         url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/record/JSON/?record_type=3d"
         r = requests.get(url, timeout=15)
         if not r.ok:
             return None
         j = r.json()
-
-        # recursive search for candidate atom lists
         candidates = []
 
         def scan(obj):
             if isinstance(obj, list):
-                # if list of dicts, check for coords
                 if obj and all(isinstance(i, dict) for i in obj):
-                    # check if items have numeric x/y/z keys
                     good = True
                     for item in obj:
                         if not any(k.lower() in item for k in ('x','y','z','coord')):
-                            # try to find numeric keys
                             if not any(isinstance(v, (int, float)) for v in item.values()):
                                 good = False
                                 break
@@ -397,7 +411,6 @@ def pubchem3d_to_xyz(cid: int) -> Optional[str]:
 
         scan(j)
 
-        # try to parse candidates
         atom_map = _atomic_number_to_symbol_map()
 
         def parse_list(lst):
@@ -405,7 +418,6 @@ def pubchem3d_to_xyz(cid: int) -> Optional[str]:
             for item in lst:
                 if not isinstance(item, dict):
                     return None
-                # try common coordinate keys
                 x = None; y = None; z = None
                 for k, v in item.items():
                     kl = k.lower()
@@ -415,26 +427,21 @@ def pubchem3d_to_xyz(cid: int) -> Optional[str]:
                         y = v
                     if kl in ('z','zcoord','z_coord') and isinstance(v, (int, float)):
                         z = v
-                # fallback: look for a list/tuple of coords
                 if x is None or y is None or z is None:
-                    # look for numeric list under some key
                     for v in item.values():
                         if isinstance(v, (list, tuple)) and len(v) >= 3 and all(isinstance(n, (int, float)) for n in v[:3]):
                             x, y, z = float(v[0]), float(v[1]), float(v[2])
                             break
 
                 if x is None or y is None or z is None:
-                    # not an atom-like dict
                     return None
 
-                # find element symbol
                 sym = None
                 for key in ('element','atom','symbol','label'):
                     if key in item and isinstance(item[key], str):
                         sym = item[key].strip()
                         break
                 if not sym:
-                    # try atomic number
                     for key in ('atomic_number','element_id','Z'):
                         if key in item:
                             try:
@@ -444,7 +451,6 @@ def pubchem3d_to_xyz(cid: int) -> Optional[str]:
                             except Exception:
                                 continue
                 if not sym:
-                    # fallback to X as 'X'
                     sym = 'X'
 
                 rows.append((sym, float(x), float(y), float(z)))
@@ -459,7 +465,6 @@ def pubchem3d_to_xyz(cid: int) -> Optional[str]:
         if not parsed:
             return None
 
-        # build XYZ string
         lines = [str(len(parsed)), f"PubChem CID {cid} 3D extracted"]
         for sym, x, y, z in parsed:
             lines.append(f"{sym} {x:.6f} {y:.6f} {z:.6f}")
@@ -472,7 +477,6 @@ def pubchem3d_to_xyz(cid: int) -> Optional[str]:
 
 st.title("Mid Molecule Thing")
 
-# Drawing tab: embed a lightweight JS molecule editor (JSME) and lookup PubChem names by SMILES.
 draw_html = r"""
 <!doctype html>
 <html>
@@ -496,145 +500,144 @@ draw_html = r"""
     </head>
     <body>
         <div class="panel">
-            <div class="toolbar">
-                <button class="btn" id="get">Get SMILES & lookup PubChem</button>
-                <button class="btn" id="copy">Copy SMILES</button>
-                <button class="btn" id="replaceBr">Replace selection with Br</button>
-                <button class="btn" id="replaceCl">Replace selection with Cl</button>
-                <button class="btn" id="replaceI">Replace selection with I</button>
-                <div style="flex:1"></div>
-                <div class="muted">Using ChemDoodle Web Components — confirm your license/hosting before deployment.</div>
-            </div>
+                <div class="toolbar">
+                        <button class="btn" id="get">Get SMILES & lookup PubChem</button>
+                        <button class="btn" id="copy">Copy SMILES</button>
+                        <button class="btn" id="fullscreen">Fullscreen</button>
+                        <button class="btn" id="save">Save to browser</button>
+                        <button class="btn" id="load">Load from browser</button>
+                        <button class="btn" id="clear">Clear</button>
+                        <div style="flex:1"></div>
+                        <div class="muted">Using Ketcher (open-source). If the editor doesn't appear, check your internet connection or host Ketcher assets locally.</div>
+                    </div>
 
-            <div id="sketcher"></div>
+                    <div id="sketcher" style="height:420px"></div>
 
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-                <div>
-                    <strong>SMILES</strong>
-                    <pre id="smiles" class="box">(empty)</pre>
-                </div>
-                <div>
-                    <strong>PubChem names (top results)</strong>
-                    <pre id="names" class="box">(none)</pre>
-                </div>
-            </div>
-            <div class="notice">If ChemDoodle fails to load, ensure the script/CSS URLs are reachable or host a local copy. Alternative editors: Ketcher (open-source).</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+                        <div>
+                            <strong>SMILES</strong>
+                            <pre id="smiles" class="box">(empty)</pre>
+                        </div>
+                        <div>
+                            <strong>PubChem names (top results)</strong>
+                            <pre id="names" class="box">(none)</pre>
+                        </div>
+                    </div>
         </div>
 
         <script>
-            // Defensive deployment: attempt to create ChemDoodle Sketcher if available
-            var sketcher = null;
-            function initSketcher(){
-                try{
-                    if(window.ChemDoodle && ChemDoodle.SketcherCanvas){
-                        // width calculated to fit container; set a reasonable height
-                        var el = document.getElementById('sketcher');
-                        var w = Math.min(window.innerWidth - 80, 900);
-                        var h = 420;
-                        sketcher = new ChemDoodle.SketcherCanvas('sketcher', w, h, {useServices:false});
-                    } else {
-                        console.warn('ChemDoodle not available');
-                        document.getElementById('sketcher').innerHTML = '<div style="padding:20px;color:#cfcfcf">ChemDoodle failed to load. Check your script/CSS URLs or use an alternative editor (Ketcher).</div>';
-                    }
-                }catch(e){
-                    console.error('initSketcher error', e);
-                    document.getElementById('sketcher').innerHTML = '<div style="padding:20px;color:#cfcfcf">Sketcher initialization error.</div>';
-                }
-            }
-
-            function getSmiles(){
-                try{
-                    if(!sketcher) return '';
-                    // try common ChemDoodle APIs defensively
-                    if(typeof sketcher.getSmiles === 'function') return sketcher.getSmiles();
-                    if(window.ChemDoodle && ChemDoodle.writeSMILES){
-                        var mol = sketcher.getMolecule ? sketcher.getMolecule() : null;
-                        if(mol) return ChemDoodle.writeSMILES(mol);
-                    }
-                    return '';
-                }catch(e){ console.warn('getSmiles failed', e); return ''; }
-            }
-
-            function setSmiles(smiles){
-                try{
-                    if(!sketcher) return;
-                    if(typeof sketcher.loadMolecule === 'function'){
-                        sketcher.loadMolecule(smiles);
-                        return;
-                    }
-                    if(typeof sketcher.setMolecule === 'function'){
-                        sketcher.setMolecule(ChemDoodle.readSMILES(smiles));
-                        return;
-                    }
-                    // fallback: attempt to read using ChemDoodle.io
-                    if(window.ChemDoodle && ChemDoodle.readSMILES){
-                        var mol = ChemDoodle.readSMILES(smiles);
-                        if(mol && sketcher.setMolecule) sketcher.setMolecule(mol);
-                    }
-                }catch(e){ console.warn('setSmiles failed', e); }
-            }
-
-            function updateDisplay(){
-                var s = getSmiles() || '';
-                document.getElementById('smiles').textContent = s || '(empty)';
-            }
-
-            document.addEventListener('DOMContentLoaded', function(){
-                // init after a short delay to allow scripts to load
-                setTimeout(initSketcher, 400);
-
-                document.getElementById('get').onclick = async function(){
-                    var s = getSmiles();
-                    document.getElementById('smiles').textContent = s || '(empty)';
-                    if(!s){ document.getElementById('names').textContent = 'No SMILES to lookup.'; return; }
-                    var enc = encodeURIComponent(s);
-                    var url = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/' + enc + '/synonyms/JSON';
-                    document.getElementById('names').textContent = 'Looking up...';
-                    try{
-                        var res = await fetch(url, {method:'GET'});
-                        if(!res.ok){ document.getElementById('names').textContent = 'No PubChem entry found.'; return; }
-                        var j = await res.json();
+                    // Ketcher integration: try to use ketcher-standalone or window.ketcher APIs
+                    var ketcher = null;
+                    function initKetcher(){
                         try{
-                            var info = j.InformationList.Information[0];
-                            var syns = info.Synonym || [];
-                            if(syns.length===0) document.getElementById('names').textContent = 'No synonyms returned by PubChem.';
-                            else document.getElementById('names').textContent = syns.slice(0,12).join('\n');
-                        }catch(e){ document.getElementById('names').textContent = 'Failed to parse PubChem response.'; }
-                    }catch(e){ document.getElementById('names').textContent = 'Lookup failed: '+String(e); }
-                };
+                            // if a global factory is provided by ketcher-standalone, attempt to instantiate
+                            if(window.Ketcher && typeof window.Ketcher === 'function'){
+                                // try common constructor forms
+                                try{ ketcher = new window.Ketcher({ element: document.getElementById('sketcher') }); }
+                                catch(e){ console.warn('Ketcher constructor variant failed', e); }
+                            }
+                            // some builds expose `ketcher` global
+                            if(!ketcher && window.ketcher){ ketcher = window.ketcher; }
+                            // some releases provide a global Editor factory
+                            if(!ketcher && window.Editor){ try{ ketcher = window.Editor && window.Editor.create ? window.Editor.create(document.getElementById('sketcher')) : null; }catch(e){} }
+                            if(!ketcher){
+                                // if none available, show a friendly message
+                                document.getElementById('sketcher').innerHTML = '<div style="padding:20px;color:#cfcfcf">Ketcher failed to load. Ensure ketcher scripts are available or use the Ketcher React/Standalone package.</div>';
+                                console.warn('Ketcher not available on window');
+                            } else {
+                                // subscribe to change events if available
+                                try{ if(ketcher.editor && ketcher.editor.subscribe) ketcher.editor.subscribe('change', function(){ updateDisplay(); }); }
+                                catch(e){}
+                            }
+                        }catch(e){ console.error('initKetcher error', e); document.getElementById('sketcher').innerHTML = '<div style="padding:20px;color:#cfcfcf">Sketcher initialization error.</div>'; }
+                    }
 
-                document.getElementById('copy').onclick = function(){
-                    var t = getSmiles() || '';
-                    navigator.clipboard && navigator.clipboard.writeText(t);
-                };
+                    async function getSmiles(){
+                        try{
+                            if(!ketcher) return '';
+                            // preferred API documented: ketcher.getSmiles()
+                            if(typeof ketcher.getSmiles === 'function'){
+                                return await ketcher.getSmiles(false);
+                            }
+                            // some builds nest the editor
+                            if(ketcher.editor && typeof ketcher.editor.getSmiles === 'function'){
+                                return await ketcher.editor.getSmiles(false);
+                            }
+                            return '';
+                        }catch(e){ console.warn('getSmiles failed', e); return ''; }
+                    }
 
-                function replaceSelectionWith(symbol){
-                    try{
-                        if(!sketcher) { appendFragment(symbol); return; }
-                        // attempt to use selection APIs
-                        if(typeof sketcher.getSelectedAtom === 'function'){
-                            var a = sketcher.getSelectedAtom();
-                            if(a){ a.label = symbol; sketcher.repaint(); updateDisplay(); return; }
-                        }
-                        // ChemDoodle sometimes exposes selection via sketcher.selected
-                        if(sketcher.selected && sketcher.selected.atom){
-                            sketcher.selected.atom.label = symbol; sketcher.repaint(); updateDisplay(); return; }
-                        // fallback: append
-                        appendFragment(symbol);
-                    }catch(e){ console.warn('replaceSelection failed', e); appendFragment(symbol); }
-                }
+                    async function setSmiles(smiles){
+                        try{
+                            if(!ketcher) return;
+                            if(typeof ketcher.setMolecule === 'function'){
+                                await ketcher.setMolecule(smiles);
+                                return;
+                            }
+                            if(ketcher.editor && typeof ketcher.editor.setMolecule === 'function'){
+                                await ketcher.editor.setMolecule(smiles);
+                                return;
+                            }
+                            // fallback: addFragment
+                            if(typeof ketcher.addFragment === 'function'){
+                                await ketcher.addFragment(smiles);
+                                return;
+                            }
+                        }catch(e){ console.warn('setSmiles failed', e); }
+                    }
 
-                function appendFragment(f){
-                    try{ var s = getSmiles() || ''; var ns = s + f; setSmiles(ns); updateDisplay(); }catch(e){ console.warn(e); }
-                }
+                    function updateDisplay(){
+                        getSmiles().then(function(s){ document.getElementById('smiles').textContent = s || '(empty)'; });
+                    }
 
-                document.getElementById('replaceBr').onclick = function(){ replaceSelectionWith('Br'); };
-                document.getElementById('replaceCl').onclick = function(){ replaceSelectionWith('Cl'); };
-                document.getElementById('replaceI').onclick = function(){ replaceSelectionWith('I'); };
+                    document.addEventListener('DOMContentLoaded', function(){
+                        // try to load ketcher scripts from unpkg as a convenience — if blocked, user should host
+                        // Note: in production you should vendor these or use ketcher-react / ketcher-standalone properly.
+                        var script = document.createElement('script');
+                        script.src = 'https://unpkg.com/ketcher-standalone@latest/dist/ketcher.min.js';
+                        script.crossOrigin = 'anonymous';
+                        script.onload = function(){ setTimeout(initKetcher, 250); };
+                        script.onerror = function(){ console.warn('Failed to load Ketcher script from unpkg'); setTimeout(initKetcher, 250); };
+                        document.head.appendChild(script);
 
-                // periodic display update
-                setInterval(updateDisplay, 800);
-            });
+                        document.getElementById('get').onclick = async function(){
+                            var s = await getSmiles();
+                            document.getElementById('smiles').textContent = s || '(empty)';
+                            if(!s){ document.getElementById('names').textContent = 'No SMILES to lookup.'; return; }
+                            var enc = encodeURIComponent(s);
+                            var url = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/' + enc + '/synonyms/JSON';
+                            document.getElementById('names').textContent = 'Looking up...';
+                            try{
+                                var res = await fetch(url, {method:'GET'});
+                                if(!res.ok){ document.getElementById('names').textContent = 'No PubChem entry found.'; return; }
+                                var j = await res.json();
+                                try{
+                                    var info = j.InformationList.Information[0];
+                                    var syns = info.Synonym || [];
+                                    if(syns.length===0) document.getElementById('names').textContent = 'No synonyms returned by PubChem.';
+                                    else document.getElementById('names').textContent = syns.slice(0,12).join('\n');
+                                }catch(e){ document.getElementById('names').textContent = 'Failed to parse PubChem response.'; }
+                            }catch(e){ document.getElementById('names').textContent = 'Lookup failed: '+String(e); }
+                        };
+
+                        document.getElementById('copy').onclick = async function(){ var t = await getSmiles(); navigator.clipboard && navigator.clipboard.writeText(t || ''); };
+
+                        document.getElementById('save').onclick = async function(){ var t = await getSmiles(); if(t){ localStorage.setItem('ketcher_smiles', t); alert('Saved to browser localStorage.'); } else alert('Nothing to save.'); };
+                        document.getElementById('load').onclick = async function(){ var t = localStorage.getItem('ketcher_smiles'); if(t){ await setSmiles(t); updateDisplay(); } else alert('No saved SMILES found in browser.'); };
+                        document.getElementById('clear').onclick = async function(){ await setSmiles(''); updateDisplay(); };
+
+                        document.getElementById('fullscreen').onclick = function(){
+                            var el = document.getElementById('sketcher');
+                            if(!document.fullscreenElement){
+                                if(el.requestFullscreen) el.requestFullscreen(); else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+                            } else {
+                                if(document.exitFullscreen) document.exitFullscreen(); else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+                            }
+                        };
+
+                        // periodic display update
+                        setInterval(updateDisplay, 800);
+                    });
         </script>
     </body>
 </html>
@@ -647,6 +650,58 @@ with draw_tab:
 sidebar = st.sidebar
 sidebar.title("Controls")
 
+# Account/Login button under Controls
+if LOGIN_LIB_AVAILABLE:
+    if 'show_login_ui' not in st.session_state:
+        st.session_state['show_login_ui'] = False
+
+    if sidebar.button('Account / Login'):
+        st.session_state['show_login_ui'] = True
+
+    # When login UI requested, render the login UI (it manages its own state)
+    if st.session_state.get('show_login_ui'):
+        try:
+            login_obj = __login__(auth_token=LOGIN_AUTH_TOKEN or '', company_name='MidMol', width=200, height=220, logout_button_name='Logout', hide_menu_bool=True, hide_footer_bool=True)
+            logged = login_obj.build_login_ui()
+            # If logged in, show a small confirmation
+            if logged:
+                sidebar.markdown(f"**Logged in**")
+        except Exception as e:
+            st.error("Login UI failed to initialize: " + str(e))
+else:
+    # show a disabled account button if lib missing
+    sidebar.button('Account / Login (install login lib)')
+
+# If logged in (by the login UI) provide account SMILES save/load controls in the Controls sidebar.
+if st.session_state.get('LOGGED_IN'):
+    sidebar.markdown("---")
+    sidebar.markdown("### Account")
+    # Ask user for their account username (the login UI stores usernames in _secret_auth_.json)
+    acct_user = sidebar.text_input('Account username (enter your login username)', value=st.session_state.get('account_username', ''))
+    st.session_state['account_username'] = acct_user
+    acct_smiles = sidebar.text_area('SMILES to save to account (paste or copy from Draw tab)', value='', key='acct_smiles')
+    if sidebar.button('Save SMILES to account'):
+        if not acct_user:
+            sidebar.error('Please enter your account username (the one you used to sign up).')
+        elif not acct_smiles.strip():
+            sidebar.error('Please paste a SMILES string to save.')
+        else:
+            ok = add_smile_for_user(acct_user.strip(), acct_smiles.strip())
+            if ok:
+                sidebar.success('Saved SMILES to account.')
+            else:
+                sidebar.error('Failed to save SMILES.')
+
+    # Show saved smiles and allow loading into the search box
+    saved = get_smiles_for_user(acct_user) if acct_user else []
+    if saved:
+        sel = sidebar.selectbox('Your saved SMILES', options=['(choose)'] + saved)
+        if sel and sel != '(choose)':
+            if sidebar.button('Use selected SMILES in Search'):
+                st.session_state['search_query'] = sel
+                st.session_state['do_search'] = True
+                st.experimental_rerun()
+
 def _trigger_search():
     st.session_state["do_search"] = True
 
@@ -656,43 +711,6 @@ if "do_search" not in st.session_state:
     st.session_state["do_search"] = False
 
 search_query = sidebar.text_input("Search (IUPAC or common name)", value=st.session_state["search_query"], key="search_query", on_change=_trigger_search)
-seed_button = sidebar.button("Seed DB (run small seed)")
-
-if seed_button:
-    st.info("Seeding DB with a small selection...")
-    try:
-        seed_script = os.path.join("db", "populate_pubchem.py")
-        if os.path.exists(seed_script):
-            import subprocess, sys
-            proc = subprocess.run([sys.executable, seed_script], capture_output=True, text=True)
-            if proc.returncode == 0:
-                st.success("Seed script finished.")
-            else:
-                st.error(f"Seeding failed (exit code {proc.returncode}).\n\nstdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}")
-        else:
-            seeds = ["glucose", "aspirin", "acetone", "benzene", "ethanol", "caffeine", "nicotine", "paracetamol", "ibuprofen", "adenine"]
-            for s in seeds:
-                comp = pubchem_fetch_by_name(s)
-                if not comp:
-                    continue
-                cid = int(comp.cid)
-                sdf_text = pubchem_sdf(cid)
-                try:
-                    db_insert({
-                        "cid": cid,
-                        "pref_name": comp.iupac_name or (comp.synonyms[0] if comp.synonyms else comp.title),
-                        "common_names": comp.synonyms or [],
-                        "smiles": comp.isomeric_smiles or comp.smiles,
-                        "inchi": comp.inchi,
-                        "formula": comp.molecular_formula,
-                        "mol_weight": comp.molecular_weight,
-                        "sdf": sdf_text.encode() if sdf_text else None
-                    })
-                except Exception as e:
-                    st.warning(f"Insert failed for {s}: {e}")
-            st.success("Inline seeding done.")
-    except Exception as e:
-        st.error("Seeding failed: " + str(e))
 
 selected_suggestion = None
 
@@ -860,9 +878,7 @@ st.markdown("Built with PubChem (PUG-REST), RDKit (optional), py3Dmol, Neon/Post
 
 with st.expander("Quick tips"):
     st.write("""
-    - Search by IUPAC or common name (e.g. `aspirin`, `glucose`).
-    - If you expect better 2D/3D rendering and automatic conformer generation, install RDKit in your environment (conda recommended).
-    - To enable fast suggestions & caching, set `DATABASE_URL` to a Postgres (Neon) connection string and seed the DB.
-    - Tailwind CSS: build `assets/styles.css` and the app will inject it at start-up if present.
+    - You can search by IUPAC or common name (e.g. `aspirin`, `glucose`).
+    - Compounds with ionic formulas (e.g., salts) will trigger an automatic search for crystal structures in the Crystallography Open Database (COD), but it will probably not work.
     """)
 
