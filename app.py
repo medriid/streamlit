@@ -540,10 +540,7 @@ with draw_tab:
             st.markdown("**SMILES from editor**")
             st.code(smiles or "(empty)")
             if smiles:
-                if st.button("Search this SMILES", key="search_from_ketcher"):
-                    st.session_state["search_query"] = smiles
-                    st.session_state["do_search"] = True
-                    st.experimental_rerun()
+                st.session_state["search_query"] = smiles
         except Exception as e:
             st.error("Molecule editor failed to initialize: " + str(e))
     else:
@@ -551,10 +548,7 @@ with draw_tab:
         fallback_smiles = st.text_area("SMILES", value="", height=360)
         if fallback_smiles:
             st.code(fallback_smiles)
-            if st.button("Search this SMILES", key="search_from_fallback"):
-                st.session_state["search_query"] = fallback_smiles
-                st.session_state["do_search"] = True
-                st.experimental_rerun()
+            st.session_state["search_query"] = fallback_smiles
 
 sidebar = st.sidebar
 sidebar.title("Controls")
@@ -616,7 +610,7 @@ if "search_query" not in st.session_state:
 if "do_search" not in st.session_state:
     st.session_state["do_search"] = False
 
-search_query = sidebar.text_input("Search (IUPAC or common name)", key="search_query", on_change=_trigger_search)
+search_query = sidebar.text_input("Search (IUPAC, common name or SMILES)", key="search_query", on_change=_trigger_search)
 
 selected_suggestion = None
 
@@ -646,7 +640,13 @@ if do_search:
         if q.isdigit():
             comp = pubchem_fetch_by_cid(int(q))
         if not comp:
-            comp = pubchem_fetch_by_name(search_query)
+            comp = pubchem_fetch_by_name(q)
+        if not comp:
+            try:
+                comps = pcp.get_compounds(q, 'smiles')
+                comp = comps[0] if comps else None
+            except Exception:
+                comp = None
         if not comp:
             st.warning("No result found on PubChem for that query.")
             result = None
