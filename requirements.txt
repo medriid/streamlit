@@ -9,3 +9,7 @@ pandas
 Pillow
 dotenv
 tqdm
+fastapi
+uvicorn
+pydantic
+pymatgen

@@ -26,6 +26,7 @@ else:
 
 import pubchempy as pcp
 import re
+CRYSTAL_SERVICE_URL = os.environ.get("CRYSTAL_SERVICE_URL")
 
 
 st.set_page_config(page_title="Mid Molecule Thing", layout="wide", initial_sidebar_state="expanded")
@@ -53,27 +54,7 @@ def inject_css():
 inject_css()
 
 
-def st_lottie_url(url: str, height: int = 240):
-    """Embed a Lottie animation from a URL using the Lottie web component.
-
-    This uses the CDN lottie-player so no extra Python package is required.
-    """
-    lottie_html = f"""
-    <script src="https://unpkg.com/@lottiefiles/lottie-player@latest/dist/lottie-player.js"></script>
-    <lottie-player
-        src="{url}"
-        background="transparent"
-        speed="1"
-        style="width:100%; height:{height}px;"
-        loop
-        autoplay>
-    </lottie-player>
-    """
-    # use the existing alias imported above
-    st_html(lottie_html, height=height)
-
-
-
+ 
 def create_table_if_missing():
     """Create molecules table and pg_trgm extension if DB present."""
     if not engine:
@@ -192,47 +173,7 @@ def pubchem_get_synonyms(cid: int) -> List[str]:
         return []
 
 
-def normalize_formula(formula: Optional[str]) -> Optional[str]:
-    """Return a more conventional formula ordering for display.
-
-    Heuristics used:
-    - If formula is empty/None, return as-is.
-    - Parse element symbols and counts and, when metals (alkali/alkaline-earth)
-      are present, place metal elements first followed by others.
-    - Otherwise fall back to original formula.
-    This fixes cases like 'ClNa' -> 'NaCl' for common salts.
-    """
-    if not formula:
-        return formula
-    # parse tokens like C6H12O6 or NaCl
-    toks = re.findall(r'([A-Z][a-z]?)(\d*)', formula)
-    if not toks:
-        return formula
-    elems = []
-    for sym, cnt in toks:
-        elems.append((sym, int(cnt) if cnt else None))
-
-    # simple metal sets
-    alkali = {"Li", "Na", "K", "Rb", "Cs", "Fr"}
-    alkaline_earth = {"Be", "Mg", "Ca", "Sr", "Ba", "Ra"}
-    metals_first = []
-    others = []
-    for sym, cnt in elems:
-        if sym in alkali or sym in alkaline_earth:
-            metals_first.append((sym, cnt))
-        else:
-            others.append((sym, cnt))
-
-    if metals_first:
-        ordered = metals_first + others
-    else:
-        # no metals detected; keep original ordering
-        ordered = elems
-
-    parts = []
-    for sym, cnt in ordered:
-        parts.append(sym + (str(cnt) if cnt else ""))
-    return "".join(parts)
+ 
 
 
 def is_probably_ionic(formula: Optional[str]) -> bool:
@@ -315,12 +256,33 @@ def sdf_to_py3dmol_html(sdf_text: str, width: int = 700, height: int = 480) -> s
         return html
 
 
-# small decorative animation near the top
-try:
-    st_lottie_url("https://assets9.lottiefiles.com/packages/lf20_tfb3estd.json", height=160)
-except Exception:
-    # if animation fails for any reason, continue without breaking the app
-    pass
+def render_3dmol_from_text(model_text: str, fmt: str = "sdf", width: int = 700, height: int = 480) -> str:
+    """Return HTML for a 3Dmol viewer with given model text and format (sdf, cif, xyz, pdb, etc.)."""
+    safe_text = model_text.replace("\\", "\\\\").replace("\n", "\\n").replace("'", "\\'")
+    html = f"""
+    <html>
+    <head><meta charset="utf-8"><script src="https://3dmol.org/build/3Dmol-min.js"></script></head>
+    <body style="margin:0;">
+    <div id='gldiv' style='width:{width}px; height:{height}px; position: relative;'></div>
+    <script>
+    const txt = '{safe_text}';
+    let viewer = $3Dmol.createViewer(document.getElementById('gldiv'), {{backgroundColor: '0x0b0b0b'}});
+    try {{
+        viewer.addModel(txt, '{fmt}');
+        viewer.setStyle({{}}, {{stick:{{}}}});
+        viewer.zoomTo();
+        viewer.render();
+    }} catch(e) {{
+        document.getElementById('gldiv').innerHTML = '<div style="color:#fff;padding:16px">3Dmol failed to parse the model.</div>';
+    }}
+    </script>
+    </body>
+    </html>
+    """
+    return html
+
+
+ 
 
 st.title("Mid Molecule Thing")
 
@@ -331,7 +293,6 @@ def _trigger_search():
     """Callback used by the search text_input to trigger a search when Enter is pressed."""
     st.session_state["do_search"] = True
 
-# Use session state so pressing Enter in the text input triggers a search on first run
 if "search_query" not in st.session_state:
     st.session_state["search_query"] = "aspirin"
 if "do_search" not in st.session_state:
@@ -386,15 +347,13 @@ if seed_button:
             if os.path.exists(seed_script):
                 import subprocess
                 import sys
-                # Run the seeder with the current Python executable and capture output so
-                # we can show the full traceback / stdout/stderr in the Streamlit UI.
+                
                 proc = subprocess.run([sys.executable, seed_script], capture_output=True, text=True)
                 if proc.returncode == 0:
                     st.success("Seed script finished.")
                 else:
                     st.error(f"Seeding failed (exit code {proc.returncode}).\n\nstdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}")
             else:
-                # Fallback: inline seeding when the external script is not present
                 seeds = ["glucose", "aspirin", "acetone", "benzene", "ethanol", "caffeine", "nicotine", "paracetamol", "ibuprofen", "adenine"]
                 for s in seeds:
                     comp = pubchem_fetch_by_name(s)
@@ -421,7 +380,6 @@ if seed_button:
 
 
 do_search = st.button("Search") or st.session_state.get("do_search", False) or (selected_suggestion is not None)
-# Clear the session-state trigger when a search run begins to avoid repeated searches
 if do_search:
     st.session_state["do_search"] = False
 if do_search:
@@ -466,7 +424,7 @@ if do_search:
                     "common_names": comp.synonyms or [],
                     "smiles": comp.isomeric_smiles or comp.smiles,
                     "inchi": comp.inchi,
-                    "formula": normalize_formula(comp.molecular_formula),
+                    "formula": comp.molecular_formula,
                     "mol_weight": comp.molecular_weight,
                     "sdf": sdf_text.encode() if sdf_text else None,
                     "source": "pubchem"
@@ -538,11 +496,42 @@ if do_search:
                 viewer_html = sdf_to_py3dmol_html(sdf_text, width=700, height=480)
                 st_html(viewer_html, height=520)
             else:
-                # If compound looks like an ionic solid (e.g., NaCl) there may be no
-                # molecular 3D model available from PubChem. Show a clearer message.
+                
                 formula = result.get("formula")
                 if is_probably_ionic(formula):
                     st.write("3D model not available for inorganic ionic solids (e.g., crystal lattice). Showing 2D image instead.")
+                    col1, col2 = st.columns([1, 1])
+                    with col1:
+                        cod_search_url = f"https://www.crystallography.net/cod/search.html?formula={result.get('formula') or ''}"
+                        st.markdown(f"[Search COD for crystal structures]({cod_search_url})")
+                    with col2:
+                        st.write("Or paste a CIF below and render it here:")
+                    
+                    cif_text = st.text_area("Paste CIF here (optional)")
+                    if st.button("Render pasted CIF") and cif_text.strip():
+                        try:
+                            viewer_html = render_3dmol_from_text(cif_text, fmt="cif", width=700, height=480)
+                            st_html(viewer_html, height=520)
+                        except Exception as e:
+                            st.error(f"Failed to render CIF: {e}")
+                    if CRYSTAL_SERVICE_URL:
+                        st.write("Or use configured crystal service to convert CIF -> XYZ/PDB and render (service detected).")
+                        if st.button("Convert & render using crystal service") and cif_text.strip():
+                            try:
+                                import json
+                                resp = requests.post(f"{CRYSTAL_SERVICE_URL.rstrip('/')}/convert/cif", json={"cif": cif_text}, timeout=30)
+                                if resp.ok:
+                                    data = resp.json()
+                                    xyz = data.get("xyz")
+                                    if xyz:
+                                        viewer_html = render_3dmol_from_text(xyz, fmt="xyz", width=700, height=480)
+                                        st_html(viewer_html, height=520)
+                                    else:
+                                        st.error("Service returned no XYZ output.")
+                                else:
+                                    st.error(f"Crystal service error: {resp.status_code} {resp.text}")
+                            except Exception as e:
+                                st.error(f"Failed to call crystal service: {e}")
                 else:
                     st.write("3D model not available.")
 
