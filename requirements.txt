@@ -8,3 +8,4 @@ python-dotenv
 pandas
 Pillow
 rdkit-pypi==2024.9.5
+dotenv
