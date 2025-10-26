@@ -27,7 +27,7 @@ else:
 import pubchempy as pcp
 
 
-st.set_page_config(page_title="MoleVis", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Mid Molecule Thing", layout="wide", initial_sidebar_state="expanded")
 
 
 def inject_css():
@@ -259,8 +259,7 @@ except Exception:
     # if animation fails for any reason, continue without breaking the app
     pass
 
-st.title("MoleVis — Interactive Molecule Explorer")
-st.markdown("**Organic-first molecule search** — search by IUPAC or common name. Results show IUPAC, SMILES, InChI, 2D image, interactive 3D viewer, and downloads.")
+st.title("Mid Molecule Thing")
 
 
 sidebar = st.sidebar
