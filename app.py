@@ -25,6 +25,7 @@ else:
 
 
 import pubchempy as pcp
+import re
 
 
 st.set_page_config(page_title="Mid Molecule Thing", layout="wide", initial_sidebar_state="expanded")
@@ -191,6 +192,68 @@ def pubchem_get_synonyms(cid: int) -> List[str]:
         return []
 
 
+def normalize_formula(formula: Optional[str]) -> Optional[str]:
+    """Return a more conventional formula ordering for display.
+
+    Heuristics used:
+    - If formula is empty/None, return as-is.
+    - Parse element symbols and counts and, when metals (alkali/alkaline-earth)
+      are present, place metal elements first followed by others.
+    - Otherwise fall back to original formula.
+    This fixes cases like 'ClNa' -> 'NaCl' for common salts.
+    """
+    if not formula:
+        return formula
+    # parse tokens like C6H12O6 or NaCl
+    toks = re.findall(r'([A-Z][a-z]?)(\d*)', formula)
+    if not toks:
+        return formula
+    elems = []
+    for sym, cnt in toks:
+        elems.append((sym, int(cnt) if cnt else None))
+
+    # simple metal sets
+    alkali = {"Li", "Na", "K", "Rb", "Cs", "Fr"}
+    alkaline_earth = {"Be", "Mg", "Ca", "Sr", "Ba", "Ra"}
+    metals_first = []
+    others = []
+    for sym, cnt in elems:
+        if sym in alkali or sym in alkaline_earth:
+            metals_first.append((sym, cnt))
+        else:
+            others.append((sym, cnt))
+
+    if metals_first:
+        ordered = metals_first + others
+    else:
+        # no metals detected; keep original ordering
+        ordered = elems
+
+    parts = []
+    for sym, cnt in ordered:
+        parts.append(sym + (str(cnt) if cnt else ""))
+    return "".join(parts)
+
+
+def is_probably_ionic(formula: Optional[str]) -> bool:
+    """Heuristic: return True if formula looks like an inorganic ionic salt.
+
+    We treat presence of alkali/alkaline-earth metals alongside non-metals
+    (e.g., halogens) as an indicator.
+    """
+    if not formula:
+        return False
+    toks = re.findall(r'([A-Z][a-z]?)', formula)
+    if not toks:
+        return False
+    alkali = {"Li", "Na", "K", "Rb", "Cs", "Fr"}
+    alkaline_earth = {"Be", "Mg", "Ca", "Sr", "Ba", "Ra"}
+    halogens = {"F", "Cl", "Br", "I", "At"}
+    has_metal = any(t in alkali or t in alkaline_earth for t in toks)
+    has_halogen = any(t in halogens for t in toks)
+    return has_metal and has_halogen
+
+
 def rdkit_2d_image(smiles: str, size=(400, 300)) -> Optional[bytes]:
     try:
         from rdkit import Chem
@@ -264,22 +327,41 @@ st.title("Mid Molecule Thing")
 
 sidebar = st.sidebar
 sidebar.title("Controls")
-search_query = sidebar.text_input("Search (IUPAC or common name)", value="aspirin")
+def _trigger_search():
+    """Callback used by the search text_input to trigger a search when Enter is pressed."""
+    st.session_state["do_search"] = True
+
+# Use session state so pressing Enter in the text input triggers a search on first run
+if "search_query" not in st.session_state:
+    st.session_state["search_query"] = "aspirin"
+if "do_search" not in st.session_state:
+    st.session_state["do_search"] = False
+
+search_query = sidebar.text_input("Search (IUPAC or common name)", value=st.session_state["search_query"], key="search_query", on_change=_trigger_search)
 sidebar.markdown("**Theme**")
 theme_choice = sidebar.selectbox("Choose theme", ["Dark (default)", "Light"], index=0)
 seed_button = sidebar.button("Seed DB (run small seed)")
 
 
 if theme_choice.startswith("Light"):
-    
-    st.components.v1.html(
-        "<style>body{background:#ffffff;color:#0b0b0b} .molevis-card{background:rgba(0,0,0,0.03);color:inherit}</style>",
-        height=0
+    st.markdown(
+        """
+        <style>
+        body { background: #ffffff; color: #0b0b0b; }
+        .molevis-card { background: rgba(0,0,0,0.03); color: inherit; }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 else:
-    st.components.v1.html(
-        "<style>body{background:#0b0b0b;color:#f7f7f7} .molevis-card{background:rgba(255,255,255,0.02);color:inherit}</style>",
-        height=0
+    st.markdown(
+        """
+        <style>
+        body { background: #0b0b0b; color: #f7f7f7; }
+        .molevis-card { background: rgba(255,255,255,0.02); color: inherit; }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
 
@@ -338,7 +420,10 @@ if seed_button:
         st.error("Seeding failed: " + str(e))
 
 
-do_search = st.button("Search") or (selected_suggestion is not None)
+do_search = st.button("Search") or st.session_state.get("do_search", False) or (selected_suggestion is not None)
+# Clear the session-state trigger when a search run begins to avoid repeated searches
+if do_search:
+    st.session_state["do_search"] = False
 if do_search:
     
     target_cid = None
@@ -453,7 +538,13 @@ if do_search:
                 viewer_html = sdf_to_py3dmol_html(sdf_text, width=700, height=480)
                 st_html(viewer_html, height=520)
             else:
-                st.write("3D model not available.")
+                # If compound looks like an ionic solid (e.g., NaCl) there may be no
+                # molecular 3D model available from PubChem. Show a clearer message.
+                formula = result.get("formula")
+                if is_probably_ionic(formula):
+                    st.write("3D model not available for inorganic ionic solids (e.g., crystal lattice). Showing 2D image instead.")
+                else:
+                    st.write("3D model not available.")
 
 
 st.markdown("---")
