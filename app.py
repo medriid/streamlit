@@ -480,36 +480,72 @@ draw_html = r"""
         <meta charset="utf-8" />
         <!-- JSME editor (hosted) -->
         <script src="https://peter-ertl.com/jsme/JSME_2018-12-16/jsme/jsme.nocache.js"></script>
-        <style>body{background:#0b0b0b;color:#fff;font-family:Arial,Helvetica,sans-serif} .panel{padding:12px;border-radius:8px;background:#101010}</style>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+        <style>
+            body{background:#0b0b0b;color:#f7f7f7;font-family:Inter,Arial,Helvetica,sans-serif;margin:12px}
+            .panel{padding:18px;border-radius:12px;background:linear-gradient(180deg, #0f0f0f 0%, #0b0b0b 100%);border:1px solid rgba(255,255,255,0.04);max-width:1100px}
+            .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+            .btn{background:transparent;border:1px solid rgba(255,255,255,0.08);padding:8px 12px;border-radius:8px;color:inherit;cursor:pointer}
+            .btn:active{transform:translateY(1px)}
+            pre.box{white-space:pre-wrap;color:#e6e6e6;background:#070707;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.03)}
+            .muted{color:rgba(255,255,255,0.6);font-size:13px}
+        </style>
     </head>
     <body>
         <div class="panel">
-            <div id="applet_container" style="width:100%;height:420px;max-width:900px;margin-bottom:8px"></div>
-            <button id="get" style="margin-right:8px">Get SMILES & lookup PubChem</button>
-            <button id="copy">Copy SMILES</button>
-            <div style="margin-top:10px">
-                <strong>SMILES:</strong>
-                <pre id="smiles" style="white-space:pre-wrap;color:#ddd;background:#0b0b0b;padding:8px;border-radius:6px"></pre>
+            <div class="toolbar">
+                <button class="btn" id="get">Get SMILES & lookup PubChem</button>
+                <button class="btn" id="copy">Copy SMILES</button>
+                <button class="btn" id="addC">Add carbon (C)</button>
+                <button class="btn" id="addDouble">Make last bond double</button>
+                <button class="btn" id="addBr">Append Br</button>
+                <button class="btn" id="addCl">Append Cl</button>
+                <button class="btn" id="addF">Append F</button>
+                <div style="flex:1"></div>
+                <div class="muted">Tip: Use the built-in editor tools (select, bond, atom) for fine edits. The buttons are convenience helpers.</div>
             </div>
-            <div style="margin-top:8px">
-                <strong>PubChem names (top results):</strong>
-                <pre id="names" style="white-space:pre-wrap;color:#ddd;background:#0b0b0b;padding:8px;border-radius:6px"></pre>
+            <div id="applet_container" style="width:100%;height:420px;max-width:900px;margin-bottom:8px"></div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+                <div>
+                    <strong>SMILES</strong>
+                    <pre id="smiles" class="box">(empty)</pre>
+                </div>
+                <div>
+                    <strong>PubChem names (top results)</strong>
+                    <pre id="names" class="box">(none)</pre>
+                </div>
             </div>
         </div>
         <script>
             // JSME will call window.jsmeOnLoad when ready
             var jsmeApplet = null;
             function jsmeOnLoad() {
-                jsmeApplet = new JSME('applet_container','100%','420px');
+                try{
+                    jsmeApplet = new JSME('applet_container','100%','420px');
+                }catch(e){ console.error('JSME load failed', e); }
             }
+
+            function safeGetSmiles(){ try{ return jsmeApplet && jsmeApplet.smiles ? jsmeApplet.getSmiles() || '' : (jsmeApplet && jsmeApplet.getSmiles ? jsmeApplet.getSmiles()||'' : ''); }catch(e){return '';}}
+            function safeSetSmiles(s){ try{ if(jsmeApplet && (jsmeApplet.setSmiles || jsmeApplet.readString)){
+                        if(jsmeApplet.setSmiles) jsmeApplet.setSmiles(s);
+                        else if(jsmeApplet.readString) jsmeApplet.readString(s);
+                    } else if(jsmeApplet && jsmeApplet.setSmiles){ jsmeApplet.setSmiles(s); } }
+                catch(e){ console.warn('setSmiles failed', e); }}
+
+            function updateDisplay(){
+                var s = '';
+                try{ s = (jsmeApplet && jsmeApplet.getSmiles) ? jsmeApplet.getSmiles() : ''; }catch(e){ s=''; }
+                document.getElementById('smiles').textContent = s || '(empty)';
+            }
+
             document.addEventListener('DOMContentLoaded', function(){
                 document.getElementById('get').onclick = async function(){
                     if(!jsmeApplet){ alert('Editor not ready yet.'); return; }
                     try{
-                        var s = jsmeApplet.getSmiles();
+                        var s = safeGetSmiles();
                         document.getElementById('smiles').textContent = s || '(empty)';
                         if(!s){ document.getElementById('names').textContent = 'No SMILES to lookup.'; return; }
-                        // Query PubChem for synonyms by SMILES
                         var enc = encodeURIComponent(s);
                         var url = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/' + enc + '/synonyms/JSON';
                         document.getElementById('names').textContent = 'Looking up...';
@@ -524,10 +560,44 @@ draw_html = r"""
                         }catch(e){ document.getElementById('names').textContent = 'Failed to parse PubChem response.'; }
                     }catch(e){ document.getElementById('names').textContent = 'Editor error: '+String(e); }
                 };
+
                 document.getElementById('copy').onclick = function(){
                     var t = document.getElementById('smiles').textContent || '';
                     navigator.clipboard && navigator.clipboard.writeText(t);
                 };
+
+                // convenience helpers that operate on SMILES text and attempt to set it back
+                function appendFragment(f){
+                    try{
+                        var s = safeGetSmiles() || '';
+                        var ns = s + f;
+                        safeSetSmiles(ns);
+                        updateDisplay();
+                    }catch(e){ console.warn(e); }
+                }
+
+                document.getElementById('addC').onclick = function(){ appendFragment('C'); };
+                document.getElementById('addBr').onclick = function(){ appendFragment('Br'); };
+                document.getElementById('addCl').onclick = function(){ appendFragment('Cl'); };
+                document.getElementById('addF').onclick = function(){ appendFragment('F'); };
+
+                document.getElementById('addDouble').onclick = function(){
+                    try{
+                        var s = safeGetSmiles() || '';
+                        if(!s){ return; }
+                        // naive: replace last occurrence of two atoms without '=' between them with a '=' inserted
+                        // e.g. CC -> C=C, COC -> CO=C (best-effort)
+                        var ns = s.replace(/([A-Za-z0-9@\[\]\(\)]+)([A-Za-z0-9@\[\]\(\)]+)$/, '$1=$2');
+                        if(ns===s){ // fallback: just append =
+                            ns = s + '=';
+                        }
+                        safeSetSmiles(ns);
+                        updateDisplay();
+                    }catch(e){ console.warn('make double failed', e); }
+                };
+
+                // update display periodically in case user edits in the applet
+                setInterval(updateDisplay, 800);
             });
         </script>
     </body>
