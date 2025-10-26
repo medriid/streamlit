@@ -503,7 +503,6 @@ st.title("Mid Molecule Thing")
 
 inject_css()
 
-# Use Streamlit's official molecule editor component when available.
 try:
     from streamlit_ketcher import st_ketcher
     KETCHER_AVAILABLE = True
@@ -515,10 +514,6 @@ tabs_placeholder, draw_tab = st.tabs(["Search", "Draw"])
 with draw_tab:
     if KETCHER_AVAILABLE:
         try:
-            # Best-effort: try to style the component iframe background to a light grey.
-            # Some Streamlit components render inside an iframe; CSS injected here
-            # targets likely iframe titles used by streamlit components. If the
-            # component supports a background/theme argument we also attempt to pass it.
             try:
                 st.markdown(
                     """
@@ -530,27 +525,21 @@ with draw_tab:
                     unsafe_allow_html=True,
                 )
             except Exception:
-                # non-fatal; continue to render editor
                 pass
-
-            # Try to pass a background argument to the component if it accepts one.
             try:
                 smiles = st_ketcher(background_color="#f0f0f0")
             except TypeError:
                 try:
-                    # Some versions may use different kwarg names; try a couple.
+                    
                     smiles = st_ketcher(theme="light", background="#f0f0f0")
                 except TypeError:
-                    # Last resort: call with no extra args.
+                
                     smiles = st_ketcher()
 
             st.markdown("**SMILES from editor**")
             st.code(smiles or "(empty)")
             if smiles:
-                if st.button("Search this SMILES", key="search_from_ketcher"):
-                    st.session_state["search_query"] = smiles
-                    st.session_state["do_search"] = True
-                    st.experimental_rerun()
+                st.session_state["search_query"] = smiles
         except Exception as e:
             st.error("Molecule editor failed to initialize: " + str(e))
     else:
@@ -558,10 +547,7 @@ with draw_tab:
         fallback_smiles = st.text_area("SMILES", value="", height=360)
         if fallback_smiles:
             st.code(fallback_smiles)
-            if st.button("Search this SMILES", key="search_from_fallback"):
-                st.session_state["search_query"] = fallback_smiles
-                st.session_state["do_search"] = True
-                st.experimental_rerun()
+            st.session_state["search_query"] = fallback_smiles
 
 sidebar = st.sidebar
 sidebar.title("Controls")
@@ -577,7 +563,7 @@ if st.session_state.get('show_login_ui'):
             login_obj = __login__(auth_token=LOGIN_AUTH_TOKEN or '', company_name='MidMol', width=200, height=220, logout_button_name='Logout', hide_menu_bool=True, hide_footer_bool=True)
             logged = login_obj.build_login_ui()
             if logged:
-                # Mirror library login into our session state.
+            
                 st.session_state['LOGGED_IN'] = True
                 if not st.session_state.get('account_username'):
                     st.session_state['account_username'] = st.session_state.get('username', '') or st.session_state.get('user', '') or ''
@@ -585,7 +571,7 @@ if st.session_state.get('show_login_ui'):
         except Exception as e:
             st.error("Login UI failed to initialize: " + str(e))
     else:
-        # No fallback form: instruct to install the optional package. We removed the lightweight fallback as requested.
+        
         st.error('Login UI library not installed. To enable accounts install `streamlit-login-auth-ui` or set up an alternative auth flow.')
 
 if st.session_state.get('LOGGED_IN'):
@@ -623,7 +609,7 @@ if "search_query" not in st.session_state:
 if "do_search" not in st.session_state:
     st.session_state["do_search"] = False
 
-search_query = sidebar.text_input("Search (IUPAC or common name)", key="search_query", on_change=_trigger_search)
+search_query = sidebar.text_input("Search (IUPAC, common name or SMILES)", key="search_query", on_change=_trigger_search)
 
 selected_suggestion = None
 
@@ -661,7 +647,12 @@ if do_search:
 
         if not comp:
             comp = pubchem_fetch_by_name(q)
-
+        if not comp:
+            try:
+                comps = pcp.get_compounds(q, 'smiles')
+                comp = comps[0] if comps else None
+            except Exception:
+                comp = None
         if not comp:
             result = None
             local_smiles = q
@@ -718,7 +709,7 @@ if do_search:
                     "cid": cid,
                     "pref_name": comp.iupac_name or (comp.synonyms[0] if comp.synonyms else comp.title),
                     "common_names": comp.synonyms or [],
-                    "smiles": comp.isomeric_smiles or comp.smiles,
+                    "smiles": comp.smiles or comp.smiles,
                     "inchi": comp.inchi,
                     "formula": normalize_formula(comp.molecular_formula),
                     "mol_weight": comp.molecular_weight,
@@ -810,6 +801,7 @@ if do_search:
                         except Exception as e:
                             st.error("Found a CIF on COD but failed to render it: " + str(e))
                     else:
+                        
                         pubchem_xyz = None
                         try:
                             with st.spinner("No CIF found — attempting PubChem 3D fallback..."):
