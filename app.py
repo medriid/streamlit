@@ -98,17 +98,6 @@ def inject_css():
 
 inject_css()
 
-KETCHER_INLINE_JS = ""
-try:
-    kpath = os.path.join(os.path.dirname(__file__), 'assets', 'ketcher.min.js')
-    if os.path.exists(kpath):
-        with open(kpath, 'r', encoding='utf8') as _fh:
-            KETCHER_INLINE_JS = _fh.read()
-except Exception:
-    KETCHER_INLINE_JS = ""
-
-ketcher_script_tag = f"<script>{KETCHER_INLINE_JS}</script>" if KETCHER_INLINE_JS else ""
-
 try:
     qp = st.query_params
     if qp and qp.get("login"):
@@ -505,166 +494,30 @@ def pubchem3d_to_xyz(cid: int) -> Optional[str]:
 
 st.title("Mid Molecule Thing")
 
-draw_html = ketcher_script_tag + r"""
-<!doctype html>
-<html>
-    <head>
-        <meta charset="utf-8" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
-        <style>
-            body{background:#0b0b0b;color:#f7f7f7;font-family:Inter,Arial,Helvetica,sans-serif;margin:12px}
-            .panel{padding:18px;border-radius:12px;background:linear-gradient(180deg, #0f0f0f 0%, #0b0b0b 100%);border:1px solid rgba(255,255,255,0.04);max-width:1100px}
-            .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
-            .btn{background:transparent;border:1px solid rgba(255,255,255,0.08);padding:8px 12px;border-radius:8px;color:inherit;cursor:pointer}
-            .btn:active{transform:translateY(1px)}
-            pre.box{white-space:pre-wrap;color:#e6e6e6;background:#070707;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.03)}
-            .muted{color:rgba(255,255,255,0.6);font-size:13px}
-            #sketcher { border: 1px solid rgba(255,255,255,0.04); border-radius:8px; background: #ffffff00 }
-            .notice { margin-top:8px; color: #cfcfcf; font-size:13px }
-        </style>
-    </head>
-    <body>
-        <div class="panel">
-                <div class="toolbar">
-                        <button class="btn" id="get">Get SMILES & lookup PubChem</button>
-                        <button class="btn" id="copy">Copy SMILES</button>
-                        <button class="btn" id="fullscreen">Fullscreen</button>
-                        <button class="btn" id="save">Save to browser</button>
-                        <button class="btn" id="load">Load from browser</button>
-                        <button class="btn" id="clear">Clear</button>
-                        <div style="flex:1"></div>
-                        <div class="muted">Using Ketcher (open-source). If the editor doesn't appear, check your internet connection or host Ketcher assets locally.</div>
-                    </div>
+inject_css()
 
-                    <div id="sketcher" style="height:420px"></div>
-
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-                        <div>
-                            <strong>SMILES</strong>
-                            <pre id="smiles" class="box">(empty)</pre>
-                        </div>
-                        <div>
-                            <strong>PubChem names (top results)</strong>
-                            <pre id="names" class="box">(none)</pre>
-                        </div>
-                    </div>
-        </div>
-
-        <script>
-                    // Ketcher integration: try to use ketcher-standalone or window.ketcher APIs
-                    var ketcher = null;
-                    function initKetcher(){
-                        try{
-                            // if a global factory is provided by ketcher-standalone, attempt to instantiate
-                            if(window.Ketcher && typeof window.Ketcher === 'function'){
-                                // try common constructor forms
-                                try{ ketcher = new window.Ketcher({ element: document.getElementById('sketcher') }); }
-                                catch(e){ console.warn('Ketcher constructor variant failed', e); }
-                            }
-                            // some builds expose `ketcher` global
-                            if(!ketcher && window.ketcher){ ketcher = window.ketcher; }
-                            // some releases provide a global Editor factory
-                            if(!ketcher && window.Editor){ try{ ketcher = window.Editor && window.Editor.create ? window.Editor.create(document.getElementById('sketcher')) : null; }catch(e){} }
-                            if(!ketcher){
-                                // if none available, show a friendly message
-                                document.getElementById('sketcher').innerHTML = '<div style="padding:20px;color:#cfcfcf">Ketcher failed to load. Ensure ketcher scripts are available or use the Ketcher React/Standalone package.</div>';
-                                console.warn('Ketcher not available on window');
-                            } else {
-                                // subscribe to change events if available
-                                try{ if(ketcher.editor && ketcher.editor.subscribe) ketcher.editor.subscribe('change', function(){ updateDisplay(); }); }
-                                catch(e){}
-                            }
-                        }catch(e){ console.error('initKetcher error', e); document.getElementById('sketcher').innerHTML = '<div style="padding:20px;color:#cfcfcf">Sketcher initialization error.</div>'; }
-                    }
-
-                    async function getSmiles(){
-                        try{
-                            if(!ketcher) return '';
-                            // preferred API documented: ketcher.getSmiles()
-                            if(typeof ketcher.getSmiles === 'function'){
-                                return await ketcher.getSmiles(false);
-                            }
-                            // some builds nest the editor
-                            if(ketcher.editor && typeof ketcher.editor.getSmiles === 'function'){
-                                return await ketcher.editor.getSmiles(false);
-                            }
-                            return '';
-                        }catch(e){ console.warn('getSmiles failed', e); return ''; }
-                    }
-
-                    async function setSmiles(smiles){
-                        try{
-                            if(!ketcher) return;
-                            if(typeof ketcher.setMolecule === 'function'){
-                                await ketcher.setMolecule(smiles);
-                                return;
-                            }
-                            if(ketcher.editor && typeof ketcher.editor.setMolecule === 'function'){
-                                await ketcher.editor.setMolecule(smiles);
-                                return;
-                            }
-                            // fallback: addFragment
-                            if(typeof ketcher.addFragment === 'function'){
-                                await ketcher.addFragment(smiles);
-                                return;
-                            }
-                        }catch(e){ console.warn('setSmiles failed', e); }
-                    }
-
-                    function updateDisplay(){
-                        getSmiles().then(function(s){ document.getElementById('smiles').textContent = s || '(empty)'; });
-                    }
-
-                        document.addEventListener('DOMContentLoaded', function(){
-                            // Ketcher is inlined into the page (vendored) so initialize directly.
-                            setTimeout(initKetcher, 250);
-
-                        document.getElementById('get').onclick = async function(){
-                            var s = await getSmiles();
-                            document.getElementById('smiles').textContent = s || '(empty)';
-                            if(!s){ document.getElementById('names').textContent = 'No SMILES to lookup.'; return; }
-                            var enc = encodeURIComponent(s);
-                            var url = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/' + enc + '/synonyms/JSON';
-                            document.getElementById('names').textContent = 'Looking up...';
-                            try{
-                                var res = await fetch(url, {method:'GET'});
-                                if(!res.ok){ document.getElementById('names').textContent = 'No PubChem entry found.'; return; }
-                                var j = await res.json();
-                                try{
-                                    var info = j.InformationList.Information[0];
-                                    var syns = info.Synonym || [];
-                                    if(syns.length===0) document.getElementById('names').textContent = 'No synonyms returned by PubChem.';
-                                    else document.getElementById('names').textContent = syns.slice(0,12).join('\n');
-                                }catch(e){ document.getElementById('names').textContent = 'Failed to parse PubChem response.'; }
-                            }catch(e){ document.getElementById('names').textContent = 'Lookup failed: '+String(e); }
-                        };
-
-                        document.getElementById('copy').onclick = async function(){ var t = await getSmiles(); navigator.clipboard && navigator.clipboard.writeText(t || ''); };
-
-                        document.getElementById('save').onclick = async function(){ var t = await getSmiles(); if(t){ localStorage.setItem('ketcher_smiles', t); alert('Saved to browser localStorage.'); } else alert('Nothing to save.'); };
-                        document.getElementById('load').onclick = async function(){ var t = localStorage.getItem('ketcher_smiles'); if(t){ await setSmiles(t); updateDisplay(); } else alert('No saved SMILES found in browser.'); };
-                        document.getElementById('clear').onclick = async function(){ await setSmiles(''); updateDisplay(); };
-
-                        document.getElementById('fullscreen').onclick = function(){
-                            var el = document.getElementById('sketcher');
-                            if(!document.fullscreenElement){
-                                if(el.requestFullscreen) el.requestFullscreen(); else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-                            } else {
-                                if(document.exitFullscreen) document.exitFullscreen(); else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
-                            }
-                        };
-
-                        // periodic display update
-                        setInterval(updateDisplay, 800);
-                    });
-        </script>
-    </body>
-</html>
-"""
+# Use Streamlit's official molecule editor component when available.
+try:
+    from streamlit_ketcher import st_ketcher
+    KETCHER_AVAILABLE = True
+except Exception:
+    st_ketcher = None
+    KETCHER_AVAILABLE = False
 
 tabs_placeholder, draw_tab = st.tabs(["Search", "Draw"])
 with draw_tab:
-    st.components.v1.html(draw_html, height=640)
+    if KETCHER_AVAILABLE:
+        try:
+            smiles = st_ketcher()
+            st.markdown("**SMILES from editor**")
+            st.code(smiles or "(empty)")
+        except Exception as e:
+            st.error("Molecule editor failed to initialize: " + str(e))
+    else:
+        st.info("Install the official Streamlit molecule editor component `streamlit-ketcher` to enable the full editor. Falling back to a simple SMILES input.")
+        fallback_smiles = st.text_area("SMILES", value="", height=360)
+        if fallback_smiles:
+            st.code(fallback_smiles)
 
 sidebar = st.sidebar
 sidebar.title("Controls")

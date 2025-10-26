@@ -14,3 +14,4 @@ uvicorn
 pydantic
 pymatgen
 streamlit-login-auth-ui
+streamlit-ketcher
