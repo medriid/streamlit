@@ -466,7 +466,7 @@ if do_search:
                     "common_names": comp.synonyms or [],
                     "smiles": comp.isomeric_smiles or comp.smiles,
                     "inchi": comp.inchi,
-                    "formula": comp.molecular_formula,
+                    "formula": normalize_formula(comp.molecular_formula),
                     "mol_weight": comp.molecular_weight,
                     "sdf": sdf_text.encode() if sdf_text else None,
                     "source": "pubchem"
