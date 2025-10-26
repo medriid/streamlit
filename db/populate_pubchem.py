@@ -4,7 +4,7 @@ import psycopg2
 from psycopg2.extras import execute_values
 from tqdm import tqdm
 
-# Get DB URL from environment or fallback
+
 DB_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/molevis")
 
 def fetch_pubchem_data(query):

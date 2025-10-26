@@ -1,4 +1,4 @@
-# app.py -- complete version
+
 import os
 import requests
 import base64
@@ -11,8 +11,8 @@ from streamlit.components.v1 import html as st_html
 from dotenv import load_dotenv
 load_dotenv()
 
-# optional database stuff
-DATABASE_URL = os.environ.get("DATABASE_URL")  # Neon/Postgres connection string (optional)
+
+DATABASE_URL = os.environ.get("DATABASE_URL")  
 USE_DB = bool(DATABASE_URL)
 
 if USE_DB:
@@ -23,15 +23,15 @@ if USE_DB:
 else:
     engine = None
 
-# pubchempy for friendly API
+
 import pubchempy as pcp
 
-# configure Streamlit
+
 st.set_page_config(page_title="MoleVis", layout="wide", initial_sidebar_state="expanded")
 
-# ------------------ UI CSS / Tailwind injection ------------------
+
 def inject_css():
-    # Prefer built Tailwind CSS file if present, else inject small fallback.
+    
     try:
         with open("assets/styles.css", "r", encoding="utf8") as fh:
             css = fh.read()
@@ -39,7 +39,7 @@ def inject_css():
     except Exception:
         fallback = """
         <style>
-        body { background: #0b0b0b; color: #f7f7f7; }
+        body { background: 
         .molevis-card { background: rgba(255,255,255,0.02); padding: 14px; border-radius: 12px; }
         .molevis-muted { color: rgba(255,255,255,0.6) }
         .molevis-title { font-weight:700; font-size:22px }
@@ -51,7 +51,7 @@ def inject_css():
 
 inject_css()
 
-# ------------------ Database helper functions ------------------
+
 def create_table_if_missing():
     """Create molecules table and pg_trgm extension if DB present."""
     if not engine:
@@ -130,14 +130,14 @@ def db_insert(mol: Dict[str, Any]) -> None:
     with engine.begin() as conn:
         conn.execute(stmt)
 
-# ensure DB ready when using it
+
 if USE_DB:
     try:
         create_table_if_missing()
     except Exception as e:
         st.warning("DB initialization failed: " + str(e))
 
-# ------------------ PubChem helpers ------------------
+
 def pubchem_fetch_by_name(name: str):
     """Return first pubchempy Compound or None."""
     try:
@@ -169,7 +169,7 @@ def pubchem_get_synonyms(cid: int) -> List[str]:
     except Exception:
         return []
 
-# ------------------ RDKit helpers (optional) ------------------
+
 def rdkit_2d_image(smiles: str, size=(400, 300)) -> Optional[bytes]:
     try:
         from rdkit import Chem
@@ -199,7 +199,7 @@ def rdkit_generate_3d_sdf(smiles: str) -> Optional[str]:
     except Exception:
         return None
 
-# ------------------ 3D viewer HTML helper ------------------
+
 def sdf_to_py3dmol_html(sdf_text: str, width: int = 700, height: int = 480) -> str:
     """Try to use py3Dmol if installed; otherwise return HTML using 3Dmol CDN."""
     try:
@@ -210,7 +210,7 @@ def sdf_to_py3dmol_html(sdf_text: str, width: int = 700, height: int = 480) -> s
         view.zoomTo()
         return view.show()
     except Exception:
-        # minimal fallback HTML using 3Dmol CDN (escape newlines & quotes)
+        
         safe_sdf = sdf_text.replace("\\", "\\\\").replace("\n", "\\n").replace("'", "\\'")
         html = f"""
         <html>
@@ -230,11 +230,11 @@ def sdf_to_py3dmol_html(sdf_text: str, width: int = 700, height: int = 480) -> s
         """
         return html
 
-# ------------------ UI layout ------------------
+
 st.title("MoleVis — Interactive Molecule Explorer")
 st.markdown("**Organic-first molecule search** — search by IUPAC or common name. Results show IUPAC, SMILES, InChI, 2D image, interactive 3D viewer, and downloads.")
 
-# Sidebar (controls)
+
 sidebar = st.sidebar
 sidebar.title("Controls")
 search_query = sidebar.text_input("Search (IUPAC or common name)", value="aspirin")
@@ -242,20 +242,20 @@ sidebar.markdown("**Theme**")
 theme_choice = sidebar.selectbox("Choose theme", ["Dark (default)", "Light"], index=0)
 seed_button = sidebar.button("Seed DB (run small seed)")
 
-# Theme handling: set CSS variables by injecting small script (works well enough)
+
 if theme_choice.startswith("Light"):
-    # inject light theme CSS override
+    
     st.components.v1.html(
-        "<style>body{background:#ffffff;color:#0b0b0b} .molevis-card{background:rgba(0,0,0,0.03);color:inherit}</style>",
+        "<style>body{background:
         height=0
     )
 else:
     st.components.v1.html(
-        "<style>body{background:#0b0b0b;color:#f7f7f7} .molevis-card{background:rgba(255,255,255,0.02);color:inherit}</style>",
+        "<style>body{background:
         height=0
     )
 
-# suggestions area
+
 suggestions = db_suggest(search_query) if search_query else []
 selected_suggestion = None
 if suggestions:
@@ -265,18 +265,18 @@ if suggestions:
         idx = opts.index(pick)
         selected_suggestion = suggestions[idx]
 
-# seed small DB if requested
+
 if seed_button:
     st.info("Seeding DB with a small selection...")
     try:
-        # call our populate script if present to seed; otherwise seed from small list here
+        
         seed_script = os.path.join("db", "populate_pubchem.py")
         if os.path.exists(seed_script):
             import subprocess
             subprocess.run(["python", seed_script], check=True)
             st.success("Seed script finished.")
         else:
-            # lightweight inline seed
+            
             seeds = ["glucose", "aspirin", "acetone", "benzene", "ethanol", "caffeine", "nicotine", "paracetamol", "ibuprofen", "adenine"]
             for s in seeds:
                 comp = pubchem_fetch_by_name(s)
@@ -301,26 +301,26 @@ if seed_button:
     except Exception as e:
         st.error("Seeding failed: " + str(e))
 
-# Search action
+
 do_search = st.button("Search") or (selected_suggestion is not None)
 if do_search:
-    # determine query target
+    
     target_cid = None
     if selected_suggestion:
         target_cid = selected_suggestion["cid"]
 
     result = None
-    # 1) If CID from suggestion, try DB first
+    
     if target_cid:
         if USE_DB:
             result = db_get(target_cid)
         if result:
             result["source"] = "db"
-    # 2) If still nothing, attempt to treat the input as name and query PubChem
+    
     if not result:
-        # try to find by name (IUPAC/common)
+        
         comp = None
-        # if user typed numeric CID directly, handle it
+        
         q = search_query.strip()
         if q.isdigit():
             comp = pubchem_fetch_by_cid(int(q))
@@ -331,13 +331,13 @@ if do_search:
             result = None
         else:
             cid = int(comp.cid)
-            # try DB cache
+            
             cached = db_get(cid) if USE_DB else None
             if cached:
                 cached["source"] = "db"
                 result = cached
             else:
-                # build result dict from PubChem
+                
                 sdf_text = pubchem_sdf(cid)
                 result = {
                     "cid": cid,
@@ -350,21 +350,21 @@ if do_search:
                     "sdf": sdf_text.encode() if sdf_text else None,
                     "source": "pubchem"
                 }
-                # attempt to insert into DB for future caching
+                
                 if USE_DB:
                     try:
                         db_insert(result)
                     except Exception as e:
                         st.warning("DB insert failed: " + str(e))
 
-    # Display result
+    
     if not result:
         st.info("No result to display.")
     else:
-        # layout columns for info and viewers
+        
         left_col, right_col = st.columns([1, 1])
         with left_col:
-            st.markdown(f"### {result.get('pref_name') or 'CID ' + str(result['cid'])}")
+            st.markdown(f"
             st.write("**CID:**", result["cid"])
             st.write("**Formula:**", result.get("formula"))
             st.write("**Mol. weight:**", result.get("mol_weight"))
@@ -372,9 +372,9 @@ if do_search:
             st.write("**InChI:**", result.get("inchi"))
             if result.get("common_names"):
                 st.write("**Synonyms:**", ", ".join(result.get("common_names")[:12]))
-            # downloads
+            
             if result.get("sdf"):
-                # sdf is bytes
+                
                 sdf_bytes = result["sdf"] if isinstance(result["sdf"], (bytes, bytearray)) else (result["sdf"].encode() if result["sdf"] else b"")
                 st.download_button("Download SDF", data=sdf_bytes, file_name=f"{result['cid']}.sdf", mime="chemical/x-mdl-sdfile")
             if result.get("smiles"):
@@ -382,7 +382,7 @@ if do_search:
             st.write(f"**Source:** {result.get('source', 'unknown')}")
 
         with right_col:
-            # 2D image (RDKit preferred)
+            
             img_bytes = None
             if result.get("smiles"):
                 img_bytes = rdkit_2d_image(result["smiles"])
@@ -396,18 +396,18 @@ if do_search:
             else:
                 st.write("2D structure not available.")
 
-            # 3D viewer
+            
             sdf_text = None
             if result.get("sdf"):
                 sdf_text = result["sdf"].decode() if isinstance(result["sdf"], (bytes, bytearray)) else result["sdf"]
             else:
-                # try PubChem SDF endpoint
+                
                 try:
                     sdf_text = pubchem_sdf(result["cid"])
                 except Exception:
                     sdf_text = None
 
-            # If no SDF and we have SMILES, attempt to generate a 3D SDF via RDKit (optional)
+            
             if not sdf_text and result.get("smiles"):
                 rdf = rdkit_generate_3d_sdf(result["smiles"])
                 if rdf:
@@ -419,11 +419,11 @@ if do_search:
             else:
                 st.write("3D model not available.")
 
-# Footer
+
 st.markdown("---")
 st.markdown("Built with PubChem (PUG-REST), RDKit (optional), py3Dmol, Neon/Postgres (optional).")
 
-# small help / quick tips
+
 with st.expander("Quick tips"):
     st.write("""
     - Search by IUPAC or common name (e.g. `aspirin`, `glucose`).
