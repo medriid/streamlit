@@ -508,9 +508,42 @@ tabs_placeholder, draw_tab = st.tabs(["Search", "Draw"])
 with draw_tab:
     if KETCHER_AVAILABLE:
         try:
-            smiles = st_ketcher()
+            # Best-effort: try to style the component iframe background to a light grey.
+            # Some Streamlit components render inside an iframe; CSS injected here
+            # targets likely iframe titles used by streamlit components. If the
+            # component supports a background/theme argument we also attempt to pass it.
+            try:
+                st.markdown(
+                    """
+                    <style>
+                    iframe[title^="streamlit-ketcher"], iframe[title^="streamlit-component"] { background: #f0f0f0 !important; }
+                    .ketcher-wrapper { background: #f0f0f0; padding: 6px; border-radius: 6px; }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            except Exception:
+                # non-fatal; continue to render editor
+                pass
+
+            # Try to pass a background argument to the component if it accepts one.
+            try:
+                smiles = st_ketcher(background_color="#f0f0f0")
+            except TypeError:
+                try:
+                    # Some versions may use different kwarg names; try a couple.
+                    smiles = st_ketcher(theme="light", background="#f0f0f0")
+                except TypeError:
+                    # Last resort: call with no extra args.
+                    smiles = st_ketcher()
+
             st.markdown("**SMILES from editor**")
             st.code(smiles or "(empty)")
+            if smiles:
+                if st.button("Search this SMILES", key="search_from_ketcher"):
+                    st.session_state["search_query"] = smiles
+                    st.session_state["do_search"] = True
+                    st.experimental_rerun()
         except Exception as e:
             st.error("Molecule editor failed to initialize: " + str(e))
     else:
@@ -518,6 +551,10 @@ with draw_tab:
         fallback_smiles = st.text_area("SMILES", value="", height=360)
         if fallback_smiles:
             st.code(fallback_smiles)
+            if st.button("Search this SMILES", key="search_from_fallback"):
+                st.session_state["search_query"] = fallback_smiles
+                st.session_state["do_search"] = True
+                st.experimental_rerun()
 
 sidebar = st.sidebar
 sidebar.title("Controls")
