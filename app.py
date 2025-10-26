@@ -30,7 +30,6 @@ import re
 import urllib.parse
 CRYSTAL_SERVICE_URL = os.environ.get("CRYSTAL_SERVICE_URL")
 try:
-    # Prefer a Courier/secret token from Streamlit secrets when available
     LOGIN_AUTH_TOKEN = None
     try:
         LOGIN_AUTH_TOKEN = st.secrets.get("COURIER_AUTH_TOKEN") if hasattr(st, 'secrets') else None
@@ -98,6 +97,17 @@ def inject_css():
         st.components.v1.html(fallback, height=0)
 
 inject_css()
+
+KETCHER_INLINE_JS = ""
+try:
+    kpath = os.path.join(os.path.dirname(__file__), 'assets', 'ketcher.min.js')
+    if os.path.exists(kpath):
+        with open(kpath, 'r', encoding='utf8') as _fh:
+            KETCHER_INLINE_JS = _fh.read()
+except Exception:
+    KETCHER_INLINE_JS = ""
+
+ketcher_script_tag = f"<script>{KETCHER_INLINE_JS}</script>" if KETCHER_INLINE_JS else ""
 
 try:
     qp = st.query_params
@@ -495,7 +505,7 @@ def pubchem3d_to_xyz(cid: int) -> Optional[str]:
 
 st.title("Mid Molecule Thing")
 
-draw_html = r"""
+draw_html = ketcher_script_tag + r"""
 <!doctype html>
 <html>
     <head>
@@ -683,29 +693,16 @@ if st.session_state.get('show_login_ui'):
             login_obj = __login__(auth_token=LOGIN_AUTH_TOKEN or '', company_name='MidMol', width=200, height=220, logout_button_name='Logout', hide_menu_bool=True, hide_footer_bool=True)
             logged = login_obj.build_login_ui()
             if logged:
-                # The library returns True on successful login. Mirror that into our session state.
+                # Mirror library login into our session state.
                 st.session_state['LOGGED_IN'] = True
-                # If a username was captured elsewhere by the lib it might be in session state; otherwise keep account_username as-is.
                 if not st.session_state.get('account_username'):
                     st.session_state['account_username'] = st.session_state.get('username', '') or st.session_state.get('user', '') or ''
                 sidebar.markdown("**Logged in**")
         except Exception as e:
             st.error("Login UI failed to initialize: " + str(e))
     else:
-        # Provide a lightweight Streamlit-only fallback login when the optional package isn't installed.
-        st.warning('Login UI library not installed — using lightweight fallback login. This fallback stores only a username in session state and is intended for demos, not production.')
-        with st.form('fallback_login'):
-            fb_user = st.text_input('Username', value=st.session_state.get('account_username',''), key='fallback_username')
-            submitted = st.form_submit_button('Login (fallback)')
-            if submitted:
-                if not fb_user or not fb_user.strip():
-                    st.error('Please enter a username to continue.')
-                else:
-                    st.session_state['LOGGED_IN'] = True
-                    st.session_state['account_username'] = fb_user.strip()
-                    st.success(f"Logged in as {fb_user.strip()}")
-                    # close the login UI
-                    st.session_state['show_login_ui'] = False
+        # No fallback form: instruct to install the optional package. We removed the lightweight fallback as requested.
+        st.error('Login UI library not installed. To enable accounts install `streamlit-login-auth-ui` or set up an alternative auth flow.')
 
 if st.session_state.get('LOGGED_IN'):
     sidebar.markdown("---")
@@ -914,8 +911,6 @@ with st.expander("Quick tips"):
     - Compounds with ionic formulas (e.g., salts) will trigger an automatic search for crystal structures in the Crystallography Open Database (COD), but it will probably not work.
     """)
 
-# Place Account / Login at the bottom of the Controls sidebar
-# Place a native Streamlit button at the end of the sidebar to open the Login / Account UI.
 if sidebar.button('Account / Login'):
     st.session_state['show_login_ui'] = True
 

@@ -20,8 +20,6 @@ async def convert_cif(payload: CIFPayload):
         struct = Structure.from_str(cif_text, fmt="cif")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse CIF: {e}")
-
-    # Convert fractional coords to Cartesian and generate XYZ
     cart_coords = struct.cart_coords
     symbols = [site.species_string for site in struct.sites]
     buf = io.StringIO()
