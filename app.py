@@ -52,6 +52,27 @@ def inject_css():
 inject_css()
 
 
+def st_lottie_url(url: str, height: int = 240):
+    """Embed a Lottie animation from a URL using the Lottie web component.
+
+    This uses the CDN lottie-player so no extra Python package is required.
+    """
+    lottie_html = f"""
+    <script src="https://unpkg.com/@lottiefiles/lottie-player@latest/dist/lottie-player.js"></script>
+    <lottie-player
+        src="{url}"
+        background="transparent"
+        speed="1"
+        style="width:100%; height:{height}px;"
+        loop
+        autoplay>
+    </lottie-player>
+    """
+    # use the existing alias imported above
+    st_html(lottie_html, height=height)
+
+
+
 def create_table_if_missing():
     """Create molecules table and pg_trgm extension if DB present."""
     if not engine:
@@ -231,6 +252,13 @@ def sdf_to_py3dmol_html(sdf_text: str, width: int = 700, height: int = 480) -> s
         return html
 
 
+# small decorative animation near the top
+try:
+    st_lottie_url("https://assets9.lottiefiles.com/packages/lf20_tfb3estd.json", height=160)
+except Exception:
+    # if animation fails for any reason, continue without breaking the app
+    pass
+
 st.title("MoleVis — Interactive Molecule Explorer")
 st.markdown("**Organic-first molecule search** — search by IUPAC or common name. Results show IUPAC, SMILES, InChI, 2D image, interactive 3D viewer, and downloads.")
 
@@ -392,7 +420,7 @@ if do_search:
                 except Exception:
                     img_bytes = None
             if img_bytes:
-                st.image(img_bytes, caption="2D structure", use_column_width=True)
+                st.image(img_bytes, caption="2D structure", use_container_width=True)
             else:
                 st.write("2D structure not available.")
 
