@@ -300,9 +300,15 @@ if seed_button:
         
         seed_script = os.path.join("db", "populate_pubchem.py")
         if os.path.exists(seed_script):
-            import subprocess
-            subprocess.run(["python", seed_script], check=True)
-            st.success("Seed script finished.")
+                import subprocess
+                import sys
+                # Run the seeder with the current Python executable and capture output so
+                # we can show the full traceback / stdout/stderr in the Streamlit UI.
+                proc = subprocess.run([sys.executable, seed_script], capture_output=True, text=True)
+                if proc.returncode == 0:
+                    st.success("Seed script finished.")
+                else:
+                    st.error(f"Seeding failed (exit code {proc.returncode}).\n\nstdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}")
         else:
             
             seeds = ["glucose", "aspirin", "acetone", "benzene", "ethanol", "caffeine", "nicotine", "paracetamol", "ibuprofen", "adenine"]
