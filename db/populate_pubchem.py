@@ -4,9 +4,17 @@ import psycopg2
 from psycopg2.extras import execute_values
 from psycopg2 import sql
 from tqdm import tqdm
+import sys
 
 
-DB_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/molevis")
+DB_URL = os.getenv("DATABASE_URL")
+
+if not DB_URL:
+    print("ERROR: DATABASE_URL is not set. On Streamlit Cloud add DATABASE_URL as a secret pointing to your Postgres instance.")
+    sys.exit(2)
+if "localhost" in DB_URL or "user:password" in DB_URL:
+    print("ERROR: DATABASE_URL appears to be a local placeholder. Replace it with a real Postgres connection string and add it as a Streamlit Cloud secret.")
+    sys.exit(2)
 
 
 def fetch_cid_for_name(name: str):

@@ -299,7 +299,10 @@ if seed_button:
     try:
         
         seed_script = os.path.join("db", "populate_pubchem.py")
-        if os.path.exists(seed_script):
+        if not USE_DB:
+            st.error("DATABASE_URL is not set. Add your Postgres DATABASE_URL as a Streamlit Cloud secret or set it in your environment before seeding.")
+        else:
+            if os.path.exists(seed_script):
                 import subprocess
                 import sys
                 # Run the seeder with the current Python executable and capture output so
@@ -309,29 +312,29 @@ if seed_button:
                     st.success("Seed script finished.")
                 else:
                     st.error(f"Seeding failed (exit code {proc.returncode}).\n\nstdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}")
-        else:
-            
-            seeds = ["glucose", "aspirin", "acetone", "benzene", "ethanol", "caffeine", "nicotine", "paracetamol", "ibuprofen", "adenine"]
-            for s in seeds:
-                comp = pubchem_fetch_by_name(s)
-                if not comp:
-                    continue
-                cid = int(comp.cid)
-                sdf_text = pubchem_sdf(cid)
-                try:
-                    db_insert({
-                        "cid": cid,
-                        "pref_name": comp.iupac_name or (comp.synonyms[0] if comp.synonyms else comp.title),
-                        "common_names": comp.synonyms or [],
-                        "smiles": comp.isomeric_smiles or comp.smiles,
-                        "inchi": comp.inchi,
-                        "formula": comp.molecular_formula,
-                        "mol_weight": comp.molecular_weight,
-                        "sdf": sdf_text.encode() if sdf_text else None
-                    })
-                except Exception as e:
-                    st.warning(f"Insert failed for {s}: {e}")
-            st.success("Inline seeding done.")
+            else:
+                # Fallback: inline seeding when the external script is not present
+                seeds = ["glucose", "aspirin", "acetone", "benzene", "ethanol", "caffeine", "nicotine", "paracetamol", "ibuprofen", "adenine"]
+                for s in seeds:
+                    comp = pubchem_fetch_by_name(s)
+                    if not comp:
+                        continue
+                    cid = int(comp.cid)
+                    sdf_text = pubchem_sdf(cid)
+                    try:
+                        db_insert({
+                            "cid": cid,
+                            "pref_name": comp.iupac_name or (comp.synonyms[0] if comp.synonyms else comp.title),
+                            "common_names": comp.synonyms or [],
+                            "smiles": comp.isomeric_smiles or comp.smiles,
+                            "inchi": comp.inchi,
+                            "formula": comp.molecular_formula,
+                            "mol_weight": comp.molecular_weight,
+                            "sdf": sdf_text.encode() if sdf_text else None
+                        })
+                    except Exception as e:
+                        st.warning(f"Insert failed for {s}: {e}")
+                st.success("Inline seeding done.")
     except Exception as e:
         st.error("Seeding failed: " + str(e))
 
