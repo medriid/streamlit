@@ -698,15 +698,13 @@ if do_search:
         else:
             cid_raw = getattr(comp, 'cid', None)
             if cid_raw is None:
-                # PubChem returned a Compound-like object but no CID — try to
-                # derive everything from any available SMILES (or the original
-                # query) since RDKit can render from SMILES without a CID.
                 smiles_candidate = getattr(comp, 'smiles', None) or q
                 try:
                     from rdkit import Chem
                     m = Chem.MolFromSmiles(smiles_candidate)
                 except Exception:
                     m = None
+                    st.warning("Invalid Smiles (ignore this, i made this warning for testing)")
 
                 if m:
                     try:
