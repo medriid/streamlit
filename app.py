@@ -696,32 +696,41 @@ if do_search:
                 st.warning("No result found on PubChem for that query.")
                 result = None
         else:
-            cid = int(comp.cid)
-            
-            cached = db_get(cid) if USE_DB else None
-            if cached:
-                cached["source"] = "db"
-                result = cached
+            cid_raw = getattr(comp, 'cid', None)
+            if cid_raw is None:
+                # PubChem returned a Compound-like object but no CID — treat as no result
+                st.warning("PubChem returned a compound without a CID; skipping PubChem result.")
+                result = None
             else:
-                
-                sdf_text = pubchem_sdf(cid)
-                result = {
-                    "cid": cid,
-                    "pref_name": comp.iupac_name or (comp.synonyms[0] if comp.synonyms else comp.title),
-                    "common_names": comp.synonyms or [],
-                    "smiles": comp.smiles or comp.smiles,
-                    "inchi": comp.inchi,
-                    "formula": normalize_formula(comp.molecular_formula),
-                    "mol_weight": comp.molecular_weight,
-                    "sdf": sdf_text.encode() if sdf_text else None,
-                    "source": "pubchem"
-                }
-                
-                if USE_DB:
-                    try:
-                        db_insert(result)
-                    except Exception as e:
-                        st.warning("DB insert failed: " + str(e))
+                try:
+                    cid = int(cid_raw)
+                except Exception:
+                    st.warning(f"Invalid CID returned by PubChem: {cid_raw}")
+                    result = None
+                else:
+                    cached = db_get(cid) if USE_DB else None
+                    if cached:
+                        cached["source"] = "db"
+                        result = cached
+                    else:
+                        sdf_text = pubchem_sdf(cid)
+                        result = {
+                            "cid": cid,
+                            "pref_name": comp.iupac_name or (comp.synonyms[0] if comp.synonyms else getattr(comp, 'title', None)),
+                            "common_names": comp.synonyms or [],
+                            "smiles": comp.smiles or comp.smiles,
+                            "inchi": comp.inchi,
+                            "formula": normalize_formula(comp.molecular_formula),
+                            "mol_weight": comp.molecular_weight,
+                            "sdf": sdf_text.encode() if sdf_text else None,
+                            "source": "pubchem"
+                        }
+
+                        if USE_DB:
+                            try:
+                                db_insert(result)
+                            except Exception as e:
+                                st.warning("DB insert failed: " + str(e))
 
     
     if not result:
