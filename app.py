@@ -698,9 +698,48 @@ if do_search:
         else:
             cid_raw = getattr(comp, 'cid', None)
             if cid_raw is None:
-                # PubChem returned a Compound-like object but no CID — treat as no result
-                st.warning("PubChem returned a compound without a CID; skipping PubChem result.")
-                result = None
+                # PubChem returned a Compound-like object but no CID — try to
+                # derive everything from any available SMILES (or the original
+                # query) since RDKit can render from SMILES without a CID.
+                smiles_candidate = getattr(comp, 'smiles', None) or q
+                try:
+                    from rdkit import Chem
+                    m = Chem.MolFromSmiles(smiles_candidate)
+                except Exception:
+                    m = None
+
+                if m:
+                    try:
+                        from rdkit.Chem import rdMolDescriptors
+                        formula = rdMolDescriptors.CalcMolFormula(m)
+                    except Exception:
+                        formula = None
+                    try:
+                        mw = rdMolDescriptors.CalcExactMolWt(m)
+                    except Exception:
+                        mw = None
+                    try:
+                        inchi = Chem.MolToInchi(m)
+                    except Exception:
+                        inchi = None
+
+                    img_bytes = rdkit_2d_image(smiles_candidate)
+                    sdf_text = rdkit_generate_3d_sdf(smiles_candidate)
+
+                    result = {
+                        "cid": None,
+                        "pref_name": comp.iupac_name or (comp.synonyms[0] if getattr(comp, 'synonyms', None) else getattr(comp, 'title', None)),
+                        "common_names": comp.synonyms or [],
+                        "smiles": smiles_candidate,
+                        "inchi": inchi,
+                        "formula": normalize_formula(formula) if formula else None,
+                        "mol_weight": float(mw) if mw is not None else (comp.molecular_weight if getattr(comp, 'molecular_weight', None) is not None else None),
+                        "sdf": sdf_text.encode() if sdf_text else None,
+                        "source": "pubchem-nocid"
+                    }
+                else:
+                    st.warning("PubChem returned a compound without a CID and no usable SMILES was found; skipping PubChem result.")
+                    result = None
             else:
                 try:
                     cid = int(cid_raw)
@@ -751,9 +790,9 @@ if do_search:
             if result.get("sdf"):
                 
                 sdf_bytes = result["sdf"] if isinstance(result["sdf"], (bytes, bytearray)) else (result["sdf"].encode() if result["sdf"] else b"")
-                st.download_button("Download SDF", data=sdf_bytes, file_name=f"{result['cid']}.sdf", mime="chemical/x-mdl-sdfile")
+                st.download_button("Download SDF", data=sdf_bytes, file_name=f"{result.get('cid') or 'structure'}.sdf", mime="chemical/x-mdl-sdfile")
             if result.get("smiles"):
-                st.download_button("Download SMILES", data=result.get("smiles"), file_name=f"{result['cid']}.smi", mime="chemical/x-daylight-smiles")
+                st.download_button("Download SMILES", data=result.get("smiles"), file_name=f"{result.get('cid') or 'structure'}.smi", mime="chemical/x-daylight-smiles")
             st.write(f"**Source:** {result.get('source', 'unknown')}")
 
         with right_col:
@@ -786,7 +825,10 @@ if do_search:
             else:
                 
                 try:
-                    sdf_text = pubchem_sdf(result["cid"])
+                    if result.get("cid"):
+                        sdf_text = pubchem_sdf(result["cid"])
+                    else:
+                        sdf_text = None
                 except Exception:
                     sdf_text = None
 
